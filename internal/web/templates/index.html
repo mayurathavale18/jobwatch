@@ -1,0 +1,109 @@
+{{define "index.html"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>jobwatch</title>
+<script src="https://unpkg.com/htmx.org@1.9.12"></script>
+<style>
+	:root { color-scheme: light dark; }
+	body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0; padding: 1.5rem; font-size: 14px; }
+	h1 { font-size: 1.1rem; margin: 0 0 0.75rem 0; }
+	.stats { display: flex; flex-wrap: wrap; gap: 1rem; margin-bottom: 1rem; padding: 0.6rem 0.9rem; border: 1px solid #8883; border-radius: 6px; }
+	.stats span { white-space: nowrap; }
+	.stats .count { font-weight: 600; }
+	.errors { color: #c0392b; }
+	.filters { display: flex; gap: 0.5rem; margin-bottom: 1rem; align-items: center; flex-wrap: wrap; }
+	.filters select, .filters input[type=text] { padding: 0.3rem 0.4rem; }
+	table { width: 100%; border-collapse: collapse; }
+	th, td { text-align: left; padding: 0.4rem 0.6rem; border-bottom: 1px solid #8883; vertical-align: top; }
+	th { font-size: 0.75rem; text-transform: uppercase; opacity: 0.7; }
+	tr:hover { background: #8881; }
+	.notes-input { width: 100%; box-sizing: border-box; border: 1px solid transparent; background: transparent; font: inherit; padding: 0.2rem; }
+	.notes-input:hover, .notes-input:focus { border-color: #8886; }
+	.status-new { color: #2980b9; }
+	.status-shortlisted { color: #8e44ad; }
+	.status-applied { color: #16a085; }
+	.status-rejected { color: #c0392b; }
+	.status-interview { color: #d35400; }
+	.status-offer { color: #27ae60; }
+	.status-ignored { color: #7f8c8d; }
+	a.title-link { color: inherit; text-decoration: none; font-weight: 500; }
+	a.title-link:hover { text-decoration: underline; }
+	.muted { opacity: 0.65; font-size: 0.85em; }
+</style>
+</head>
+<body>
+	<h1>jobwatch</h1>
+
+	<div class="stats">
+		<span>Total: <span class="count">{{.TotalJobs}}</span></span>
+		{{range $status, $n := .StatusCounts}}<span>{{$status}}: <span class="count">{{$n}}</span></span>{{end}}
+		{{if .LastPoll}}
+			<span>Last poll: {{.LastPoll.FinishedAt.String}}</span>
+			<span>OK: {{.LastPoll.CompaniesOK}} / Failed: {{.LastPoll.CompaniesFailed}} / New: {{.LastPoll.NewJobs}}</span>
+			{{if .LastPoll.Errors}}<span class="errors">Errors: {{.LastPoll.Errors}}</span>{{end}}
+		{{else}}
+			<span class="muted">No poll runs yet</span>
+		{{end}}
+	</div>
+
+	<form class="filters" method="get" action="/">
+		<select name="status" onchange="this.form.submit()">
+			<option value="">All statuses</option>
+			{{$cur := .FilterStatus}}
+			{{range .Statuses}}
+				<option value="{{.}}" {{if eq . $cur}}selected{{end}}>{{.}}</option>
+			{{end}}
+		</select>
+		<select name="company" onchange="this.form.submit()">
+			<option value="">All companies</option>
+			{{$curCompany := .FilterCompany}}
+			{{range .Companies}}
+				<option value="{{.}}" {{if eq . $curCompany}}selected{{end}}>{{.}}</option>
+			{{end}}
+		</select>
+		<input type="text" name="q" placeholder="Search title..." value="{{.FilterSearch}}">
+		<button type="submit">Filter</button>
+		<a href="/">Reset</a>
+	</form>
+
+	<table>
+		<thead>
+			<tr>
+				<th>First seen</th>
+				<th>Company</th>
+				<th>Title</th>
+				<th>Location</th>
+				<th>Status</th>
+				<th>Notes</th>
+			</tr>
+		</thead>
+		<tbody>
+			{{range .Jobs}}
+			<tr>
+				<td>{{.FirstSeenAt}}</td>
+				<td>{{.CompanyName}}</td>
+				<td><a class="title-link" href="{{.URL}}" target="_blank" rel="noopener">{{.Title}}</a></td>
+				<td>{{.Location}}</td>
+				<td>
+					<select class="status-{{.Status}}" hx-patch="/jobs/{{.ID}}" hx-trigger="change" hx-swap="none" name="status">
+						{{$jobStatus := .Status}}
+						{{range $.Statuses}}
+							<option value="{{.}}" {{if eq . $jobStatus}}selected{{end}}>{{.}}</option>
+						{{end}}
+					</select>
+				</td>
+				<td>
+					<input class="notes-input" type="text" name="notes" value="{{.Notes}}"
+						hx-patch="/jobs/{{.ID}}" hx-trigger="change" hx-swap="none">
+				</td>
+			</tr>
+			{{else}}
+			<tr><td colspan="6" class="muted">No jobs match the current filters.</td></tr>
+			{{end}}
+		</tbody>
+	</table>
+</body>
+</html>
+{{end}}

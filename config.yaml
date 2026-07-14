@@ -1,0 +1,22 @@
+companies:
+  - name: "Stripe"
+    provider: greenhouse
+    slug: stripe
+  - name: "Razorpay"
+    provider: lever
+    slug: razorpay
+  # add more companies here — see README.md for how to find each slug
+
+filters:
+  include_keywords: ["backend", "software engineer", "sde", "platform", "golang", "python"]
+  exclude_keywords: ["staff", "principal", "director", "manager", "intern", "10+ years"]
+  locations_include: ["india", "hyderabad", "bengaluru", "bangalore", "remote"]
+
+telegram:
+  bot_token_env: "JOBWATCH_TG_TOKEN"
+  chat_id_env: "JOBWATCH_TG_CHAT"
+
+dashboard:
+  addr: "127.0.0.1:8787"
+
+db_path: "./jobwatch.db"

@@ -1,0 +1,265 @@
+{
+  "jobs": [
+    {
+      "absolute_url": "https://stripe.com/jobs/search?gh_jid=7954688",
+      "data_compliance": [
+        {
+          "type": "gdpr",
+          "requires_consent": false,
+          "requires_processing_consent": false,
+          "requires_retention_consent": false,
+          "retention_period": null,
+          "demographic_data_consent_applies": false
+        }
+      ],
+      "internal_job_id": 3453698,
+      "location": {
+        "name": "San Francisco, CA"
+      },
+      "metadata": null,
+      "id": 7954688,
+      "updated_at": "2026-07-13T14:37:36-04:00",
+      "requisition_id": "See Opening ID",
+      "title": "Account Executive, AI Sales (Grower)",
+      "company_name": "Stripe",
+      "first_published": "2026-06-02T08:58:57-04:00",
+      "language": "en",
+      "application_deadline": null,
+      "content": "&lt;h2&gt;Who we are&lt;/h2&gt;\n&lt;h3&gt;About Stripe&lt;/h3&gt;\n&lt;p&gt;Stripe is a financial infrastructure platform for businesses. Millions of companies - from the world\u2019s largest enterprises to the most ambitious startups - use Stripe to accept payments, grow their revenue, and accelerate new business opportunities. Our mission is to increase the GDP of the internet, and we have a staggering amount of work ahead. That means you have an unprecedented opportunity to put the global economy within everyone&#39;s reach while doing the most important work of your career.&lt;/p&gt;\n&lt;h3&gt;About the team&lt;/h3&gt;\n&lt;p&gt;The AI team is focused on one of Stripe\u2019s most strategic growth areas: enabling the monetization and scaling of AI-native and AI-enabled businesses. We\u2019re in a unique position \u2013 partnering with the world\u2019s most ambitious AI companies (the likes of OpenAI, Anthropic, NVIDIA, etc) building on the frontier of artificial intelligence -- across infrastructure, foundation models, agents, and applications -- to help them grow and commercialize globally using Stripe\u2019s full financial stack.&lt;/p&gt;\n&lt;p&gt;As part of Stripe\u2019s GTM / Sales organization, this team works closely with Product, Engineering, and Marketing to shape Stripe\u2019s AI GTM strategy and ensure that the world\u2019s leading AI companies -- from early-stage innovators to the largest public players -- choose Stripe as their monetization platform.&lt;/p&gt;\n&lt;h3&gt;What you\u2019ll do&lt;/h3&gt;\n&lt;ul&gt;\n&lt;li&gt;Work with existing Stripe customers in the AI Industry to develop and execute long-term sales strategies to expand Stripe\u2019s revenue&lt;/li&gt;\n&lt;li&gt;Own the full sales cycle, from business case development, to deal structuring and negotiating, to close&lt;/li&gt;\n&lt;li&gt;Develop account plans and cross sell into your list of strategic AI customers, driving growth through expansion and new revenue streams&amp;nbsp;&lt;/li&gt;\n&lt;li&gt;Drive deal strategy and commercial negotiations for large, complex renewals&lt;/li&gt;\n&lt;li&gt;Develop relationships with executive stakeholders within your book of business, deeply understanding problems they are solving and helping drive to solutions&lt;/li&gt;\n&lt;li&gt;Be responsible for account mapping and coordinating effective meetings with the appropriate external stakeholders expanding the customer relationship&lt;/li&gt;\n&lt;li&gt;Lead and contribute to team projects to develop and refine our sales process and help shape the Stripe sales culture&lt;/li&gt;\n&lt;/ul&gt;\n&lt;h3&gt;Minimum requirements&lt;/h3&gt;\n&lt;ul&gt;\n&lt;li&gt;6+ years of sales experience, preferably selling a technical product, with a track record of top performance&lt;/li&gt;\n&lt;li&gt;2+ years leading complex sales cycles with Enterprise organizations required&lt;/li&gt;\n&lt;li&gt;Ability to understand technical requirements and craft solutions across multiple products&lt;/li&gt;\n&lt;li&gt;Ability to develop and execute account plans spanning multiple business units across complex organizations&lt;/li&gt;\n&lt;li&gt;A knack for working well with a wide range of people, both internally and externally&lt;/li&gt;\n&lt;li&gt;Strong presentation skills, particularly for in-person meetings with multiple stakeholders&lt;/li&gt;\n&lt;li&gt;Proven ability to lead complex negotiations involving bespoke commercial agreements&lt;/li&gt;\n&lt;li&gt;Superior verbal and written communication skills&lt;/li&gt;\n&lt;li&gt;Ability to operate in a highly ambiguous and fast-paced environment&lt;/li&gt;\n&lt;li&gt;Strong interest in technology and a deep understanding of the space&lt;/li&gt;\n&lt;/ul&gt;",
+      "departments": [
+        {
+          "id": 380786,
+          "name": "1654 Account Executives (AI)",
+          "child_ids": [],
+          "parent_id": 85336
+        }
+      ],
+      "offices": [
+        {
+          "id": 65234,
+          "name": "US",
+          "location": null,
+          "child_ids": [
+            89623,
+            249942,
+            249943,
+            230657,
+            61413,
+            80440,
+            344486,
+            83778,
+            61414,
+            83767,
+            83768,
+            83776,
+            83769,
+            83770,
+            83771,
+            83772,
+            83773,
+            83774,
+            89624,
+            83789,
+            83775,
+            83777,
+            83779,
+            83780,
+            83820,
+            83781,
+            83782,
+            83783,
+            83784,
+            83785,
+            83786,
+            83787,
+            83821,
+            83788,
+            83790,
+            83791,
+            83792,
+            83793,
+            83794,
+            83854,
+            83861,
+            83795,
+            83796,
+            83797,
+            83831,
+            83798,
+            83799,
+            83856,
+            83800,
+            83801,
+            83819,
+            83802,
+            83850,
+            83803,
+            83804,
+            83805,
+            83806,
+            83807,
+            83808,
+            83809,
+            83810,
+            83811,
+            83812,
+            83813,
+            83815,
+            83817,
+            83822,
+            83824,
+            83846,
+            83825,
+            83829,
+            83830,
+            65238,
+            83834,
+            83849,
+            83859,
+            83835,
+            83836,
+            83837,
+            83839,
+            83840,
+            83841,
+            83842,
+            83843,
+            83844,
+            83847,
+            83848,
+            83851,
+            83852,
+            83853,
+            83855,
+            83857,
+            83858,
+            83860,
+            83862,
+            83814,
+            83818,
+            83823,
+            83826,
+            83827,
+            83828,
+            83832,
+            83833,
+            83816,
+            85342,
+            83838,
+            83845,
+            223073,
+            265365,
+            16654
+          ],
+          "parent_id": 673
+        }
+      ],
+      "ai_disclaimer": null,
+      "include_ai_disclaimer": false,
+      "ai_opt_out_request_url": "http://app.greenhouse.io/ai_opt_out_request/job_post/7954688/ai_opt_out"
+    },
+    {
+      "absolute_url": "https://stripe.com/jobs/search?gh_jid=8042978",
+      "data_compliance": [
+        {
+          "type": "gdpr",
+          "requires_consent": false,
+          "requires_processing_consent": false,
+          "requires_retention_consent": false,
+          "retention_period": null,
+          "demographic_data_consent_applies": false
+        }
+      ],
+      "internal_job_id": 3486109,
+      "location": {
+        "name": "Japan"
+      },
+      "metadata": null,
+      "id": 8042978,
+      "updated_at": "2026-07-02T21:13:43-04:00",
+      "requisition_id": "See Opening ID",
+      "title": "Account Executive, Commercial Grower (Japanese Fluency)",
+      "company_name": "Stripe",
+      "first_published": "2026-07-02T03:24:50-04:00",
+      "language": "ja",
+      "application_deadline": null,
+      "content": "&lt;h2&gt;&lt;strong&gt;Who we are&lt;/strong&gt;&lt;/h2&gt;\n&lt;h3&gt;&lt;strong&gt;About Stripe&lt;/strong&gt;&lt;/h3&gt;\n&lt;p&gt;Stripe is a financial infrastructure platform for businesses. Millions of companies from the world\u2019s largest enterprises to the most ambitious startups use Stripe to accept payments, grow their revenue, and accelerate new business opportunities. Our mission is to increase the GDP of the internet, and we have a staggering amount of work ahead. That means you have an unprecedented opportunity to put the global economy within everyone\u2019s reach while doing the most important work of your career.&lt;/p&gt;\n&lt;h3&gt;&lt;strong&gt;About the team&lt;/strong&gt;&lt;/h3&gt;\n&lt;p&gt;The Commercial (Mid-Market) Grower team is a highly consultative group that manages relationships with and is responsible for the growth and retention of Stripe\u2019s fastest growing users.&lt;/p&gt;\n&lt;h2&gt;&lt;strong&gt;What you\u2019ll do&lt;/strong&gt;&lt;/h2&gt;\n&lt;p&gt;As an Account Executive (Grower, Commercial), you\u2019ll identify opportunities for our users to get the most out of Stripe by quickly understanding our users\u2019 needs in order for them to grow with us. We\u2019re looking for a well-rounded strategic operator who is capable of engaging in business-level and technical conversations at multiple levels of the organisation, including Founders, CTO, COO, and CFO in order to drive commercial outcomes. You are used to building value in competitive situations and enjoy working on products that require deep product understanding, combined with technical knowledge.&lt;/p&gt;\n&lt;p&gt;This is a dynamic role, evolving rapidly. If you\u2019re hungry, smart, persistent, adaptable and a great teammate, we want to hear from you!&lt;/p&gt;\n&lt;h3&gt;&lt;strong&gt;Responsibilities&lt;/strong&gt;&lt;/h3&gt;\n&lt;ul&gt;\n&lt;li&gt;Own a named account list and develop account plans for winning and expanding business with funded startups&lt;/li&gt;\n&lt;li&gt;Develop outbound strategies to create and nurture opportunities.&lt;/li&gt;\n&lt;li&gt;Own the full sales cycle from prospecting to close, to go live for startup companies in region.&lt;/li&gt;\n&lt;li&gt;Own contract renewals and lead commercial negotiations to increase and retain existing customer revenue and Stripe market share.&lt;/li&gt;\n&lt;li&gt;Develop relationships with executive stakeholders at new and existing users.&lt;/li&gt;\n&lt;li&gt;Work with company leaders from multiple functions (e.g., Engineering, Product, and Finance) to lead complex product workshops and develop financial analyses.&lt;/li&gt;\n&lt;li&gt;Lead and contribute to team projects to develop and refine our sales process.&lt;/li&gt;\n&lt;li&gt;Engage with cross functional teams (Partners, Post Sales, Product and Engineering) to help drive and iterate Stripe\u2019s strategy.&lt;/li&gt;\n&lt;/ul&gt;\n&lt;h2&gt;&lt;strong&gt;Who you are&lt;/strong&gt;&lt;/h2&gt;\n&lt;p&gt;We\u2019re looking for someone who meets the minimum requirements to be considered for the role. If you meet these requirements, you are encouraged to apply. The preferred qualifications are a bonus, not a requirement.&lt;/p&gt;\n&lt;h3&gt;&lt;strong&gt;Minimum requirements&lt;/strong&gt;&lt;/h3&gt;\n&lt;ul&gt;\n&lt;li&gt;5+ years of experience in a client-facing role, with either sales or renewal based KPIs within a rapidly growing organization.&lt;/li&gt;\n&lt;li&gt;Verbal and written communication skills in both English and Japanese&lt;/li&gt;\n&lt;li&gt;Ability to understand complex requirements and craft custom solutions&lt;/li&gt;\n&lt;li&gt;Strong analytical and quantitative capabilities including comfort with basic financial modeling&lt;/li&gt;\n&lt;li&gt;Superior verbal and written communication skills&lt;/li&gt;\n&lt;li&gt;Ability to operate in a highly ambiguous and fast-paced environment&lt;/li&gt;\n&lt;li&gt;Strong interest in technology&lt;/li&gt;\n&lt;/ul&gt;\n&lt;h3&gt;&lt;strong&gt;Preferred Qualifications&lt;/strong&gt;&lt;/h3&gt;\n&lt;ul&gt;\n&lt;li&gt;Ability to understand the Stripe API&lt;/li&gt;\n&lt;li&gt;Experience with Excel and SQL, or a willingness to learn&lt;/li&gt;\n&lt;/ul&gt;\n&lt;h2&gt;&lt;br&gt;&lt;br&gt;&lt;/h2&gt;",
+      "departments": [
+        {
+          "id": 81432,
+          "name": "1195 Account Executives (APAC)",
+          "child_ids": [],
+          "parent_id": 81963
+        }
+      ],
+      "offices": [
+        {
+          "id": 87012,
+          "name": "Japan Locations",
+          "location": null,
+          "child_ids": [
+            80448,
+            80447
+          ],
+          "parent_id": 4260
+        }
+      ],
+      "ai_disclaimer": null,
+      "include_ai_disclaimer": false,
+      "ai_opt_out_request_url": "http://app.greenhouse.io/ai_opt_out_request/job_post/8042978/ai_opt_out"
+    },
+    {
+      "absolute_url": "https://stripe.com/jobs/search?gh_jid=7789539",
+      "data_compliance": [
+        {
+          "type": "gdpr",
+          "requires_consent": false,
+          "requires_processing_consent": false,
+          "requires_retention_consent": false,
+          "retention_period": null,
+          "demographic_data_consent_applies": false
+        }
+      ],
+      "internal_job_id": 3407094,
+      "location": {
+        "name": "Japan"
+      },
+      "metadata": null,
+      "id": 7789539,
+      "updated_at": "2026-07-02T21:14:52-04:00",
+      "requisition_id": "See Opening ID",
+      "title": "Account Executive, Commercial Hunter (Japanese Fluency)",
+      "company_name": "Stripe",
+      "first_published": "2026-04-17T00:47:42-04:00",
+      "language": "ja",
+      "application_deadline": null,
+      "content": "&lt;h2&gt;&lt;strong&gt;Who we are&lt;/strong&gt;&lt;/h2&gt;\n&lt;h3&gt;&lt;strong&gt;About Stripe&lt;/strong&gt;&lt;/h3&gt;\n&lt;p&gt;Stripe is a financial infrastructure platform for businesses. Millions of companies\u2014from the world\u2019s largest enterprises to the most ambitious startups\u2014use Stripe to accept payments, grow their revenue, and accelerate new business opportunities. Our mission is to increase the GDP of the internet, and we have a staggering amount of work ahead. That means you have an unprecedented opportunity to put the global economy within everyone\u2019s reach while doing the most important work of your career.&lt;/p&gt;\n&lt;h3&gt;&lt;strong&gt;About The Team&lt;/strong&gt;&lt;/h3&gt;\n&lt;p&gt;A Stripe Commercial (Mid-Market) Account Executive partners with high-growth, under-penetrated mid-market businesses to help them scale and modernize their financial infrastructure. These companies\u2014often tech-forward, founder-led, and rapidly scaling\u2014represent Stripe&#39;s next generation of breakout users.&lt;/p&gt;\n&lt;p&gt;Stripe Commercial AEs are responsible for both acquiring new users and expanding existing relationships. They guide companies through the full sales lifecycle, uncovering pain points, aligning on solutions across the Stripe product suite, and driving long-term value. Commercial AEs serve as strategic advisors, helping users unlock new revenue, streamline operations, and launch ambitious new products on top of the Stripe platform.&lt;/p&gt;\n&lt;h2&gt;&lt;strong&gt;What you\u2019ll do&lt;/strong&gt;&lt;/h2&gt;\n&lt;p&gt;Commercial AEs own a book of high-potential accounts\u2014some already using Stripe, others still evaluating. They operate with a dual motion\u2014hunting for new growth opportunities and farming existing relationships for deeper adoption and expansion. They work cross-functionally with Solutions, Product, Post-Sales, and Sales Ops to craft tailored strategies and execute at high velocity.&lt;/p&gt;\n&lt;h3&gt;&lt;strong&gt;Responsibilities&lt;/strong&gt;&lt;/h3&gt;\n&lt;ul&gt;\n&lt;li&gt;Identify high-potential, fast-growing eCommerce platforms for a full-stack Stripe implementation, from payments to Connect&lt;/li&gt;\n&lt;li&gt;Lead a product and pricing workshop with an existing user to introduce Radar and optimize their fraud stack&lt;/li&gt;\n&lt;li&gt;Develop and execute an outbound play to target a new vertical in their region or territory&lt;/li&gt;\n&lt;li&gt;Create and deliver compelling product walkthroughs to showcase how the expanding Stripe product suite (like Issuing or Treasury) maps to customer goals&lt;/li&gt;\n&lt;li&gt;Drive commercial discussions and close complex, high-impact deals\u2014both net-new and upsell&lt;/li&gt;\n&lt;li&gt;Partner with Customer Success and Solutions Architects to resolve user pain points and deepen Stripe integration&lt;/li&gt;\n&lt;li&gt;Share feedback with Product and Marketing teams to help inform roadmap and messaging prioritie&lt;/li&gt;\n&lt;/ul&gt;\n&lt;h2&gt;Who you are&lt;/h2&gt;\n&lt;p&gt;We&#39;re looking for someone who meets the minimum requirements to be considered for the role. If you meet these requirements, you are encouraged to apply. The preferred qualifications are a bonus, not a requirement.&lt;/p&gt;\n&lt;h3&gt;&lt;strong&gt;Minimum requirements&lt;/strong&gt;&lt;/h3&gt;\n&lt;ul&gt;\n&lt;li&gt;3 years of experience in solution sales field&lt;/li&gt;\n&lt;li&gt;High professional fluency in Japanese and English&lt;/li&gt;\n&lt;li&gt;Ability to understand complex requirements and craft custom solutions&lt;/li&gt;\n&lt;li&gt;Strong problem-solving and quantitative capabilities including comfort with basic financial modeling&lt;/li&gt;\n&lt;li&gt;Ability to operate in a highly ambiguous and fast-paced environment&lt;/li&gt;\n&lt;li&gt;Strong interest in technology&lt;/li&gt;\n&lt;/ul&gt;\n&lt;h3&gt;Preferred qualifications&lt;/h3&gt;\n&lt;ul&gt;\n&lt;li&gt;Ability to understand the Stripe API&lt;/li&gt;\n&lt;li&gt;Experience with Excel and SQL, or a willingness to learn&lt;/li&gt;\n&lt;/ul&gt;",
+      "departments": [
+        {
+          "id": 81432,
+          "name": "1195 Account Executives (APAC)",
+          "child_ids": [],
+          "parent_id": 81963
+        }
+      ],
+      "offices": [
+        {
+          "id": 87012,
+          "name": "Japan Locations",
+          "location": null,
+          "child_ids": [
+            80448,
+            80447
+          ],
+          "parent_id": 4260
+        }
+      ],
+      "ai_disclaimer": null,
+      "include_ai_disclaimer": false,
+      "ai_opt_out_request_url": "http://app.greenhouse.io/ai_opt_out_request/job_post/7789539/ai_opt_out"
+    }
+  ],
+  "meta": {
+    "total": 520
+  }
+}

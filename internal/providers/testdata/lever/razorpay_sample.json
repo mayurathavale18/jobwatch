@@ -1,0 +1,44 @@
+[
+  {
+    "id": "a1b2c3d4-e5f6-4789-9abc-def012345678",
+    "text": "Backend Engineer - Payments",
+    "hostedUrl": "https://jobs.lever.co/razorpay/a1b2c3d4-e5f6-4789-9abc-def012345678",
+    "applyUrl": "https://jobs.lever.co/razorpay/a1b2c3d4-e5f6-4789-9abc-def012345678/apply",
+    "categories": {
+      "team": "Engineering",
+      "location": "Bengaluru, India",
+      "commitment": "Full-time",
+      "department": "Engineering"
+    },
+    "createdAt": 1751328000000,
+    "workplaceType": "hybrid"
+  },
+  {
+    "id": "b2c3d4e5-f6a7-4890-abcd-ef0123456789",
+    "text": "Staff Software Engineer, Platform",
+    "hostedUrl": "https://jobs.lever.co/razorpay/b2c3d4e5-f6a7-4890-abcd-ef0123456789",
+    "applyUrl": "https://jobs.lever.co/razorpay/b2c3d4e5-f6a7-4890-abcd-ef0123456789/apply",
+    "categories": {
+      "team": "Engineering",
+      "location": "Remote - India",
+      "commitment": "Full-time",
+      "department": "Engineering"
+    },
+    "createdAt": 1751414400000,
+    "workplaceType": "remote"
+  },
+  {
+    "id": "c3d4e5f6-a7b8-4901-bcde-f01234567890",
+    "text": "SDE II - Golang",
+    "hostedUrl": "https://jobs.lever.co/razorpay/c3d4e5f6-a7b8-4901-bcde-f01234567890",
+    "applyUrl": "https://jobs.lever.co/razorpay/c3d4e5f6-a7b8-4901-bcde-f01234567890/apply",
+    "categories": {
+      "team": "Engineering",
+      "location": "Hyderabad, India",
+      "commitment": "Full-time",
+      "department": "Engineering"
+    },
+    "createdAt": 1751500800000,
+    "workplaceType": "onsite"
+  }
+]
