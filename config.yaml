@@ -3,8 +3,8 @@ companies:
     provider: greenhouse
     slug: stripe
   - name: "Razorpay"
-    provider: lever
-    slug: razorpay
+    provider: greenhouse
+    slug: razorpaysoftwareprivatelimited
   # add more companies here — see README.md for how to find each slug
 
 filters:
