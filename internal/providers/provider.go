@@ -13,6 +13,10 @@ import (
 // Job is the normalized representation of a single job posting, regardless
 // of which ATS it came from.
 type Job struct {
+	// ID is the database row id. It is zero for freshly-fetched jobs and
+	// populated by the poller after insert, so it can be embedded in
+	// outgoing Telegram notifications for the #J{id} reply-tag.
+	ID          int64
 	Provider    string
 	CompanySlug string
 	CompanyName string

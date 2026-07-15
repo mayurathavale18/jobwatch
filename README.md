@@ -97,15 +97,46 @@ what jobwatch actually does — verified against Ashby's own public board.
 
 ## Cron example
 
-Run a poll every 15 minutes:
+Run a poll every 15 minutes, and drain Telegram replies every 5:
 
 ```cron
 */15 * * * * cd /path/to/jobwatch && ./bin/jobwatch poll -config config.yaml >> poll.log 2>&1
+*/5  * * * * cd /path/to/jobwatch && ./bin/jobwatch tg-sync -config config.yaml >> tgsync.log 2>&1
 ```
 
 Run the dashboard as a systemd user service or in a long-lived shell/tmux
 session with `make run-serve` — it binds to `127.0.0.1` only, so it's not
 exposed beyond your machine.
+
+## Two-way status control via Telegram
+
+Every job notification `poll` sends ends with a hidden tag, e.g. `#J123`.
+**Reply directly to that message** in Telegram to update the job's status
+or leave a note — no need to open the dashboard. `tg-sync` drains these
+replies on its own schedule (see cron example above) and applies them.
+
+Reply with (first word, case-insensitive):
+
+| Reply keyword(s) | Status set |
+|---|---|
+| `applied`, `done`, `apld` | `applied` |
+| `skip`, `skipped`, `ignore`, `no` | `ignored` |
+| `shortlist`, `sl`, `later` | `shortlisted` |
+| `rejected`, `reject`, `rej` | `rejected` |
+| `interview`, `iv` | `interview` |
+| `offer` | `offer` |
+| `new`, `reset` | `new` |
+
+Or reply starting with `note: ` (e.g. `note: applied via referral`) to
+append a timestamped note without changing status.
+
+If your reply doesn't match any keyword, jobwatch replies with the keyword
+list above and leaves the job's status untouched. If it can't find a job
+tag in the message you replied to, or the tagged job id doesn't exist, it
+replies explaining why — either way, nothing in the database changes.
+
+Only replies from the chat configured in `JOBWATCH_TG_CHAT` are processed;
+updates from any other chat are logged and ignored.
 
 ## Commands
 
@@ -115,6 +146,7 @@ exposed beyond your machine.
 | `jobwatch backfill` | Same as `poll`, but never sends notifications — use this once, on first run, to seed the database. |
 | `jobwatch serve` | Runs the dashboard web server (long-running). |
 | `jobwatch test-notify` | Sends a single test Telegram message and exits. Fails with a clear error if `JOBWATCH_TG_TOKEN` / `JOBWATCH_TG_CHAT` aren't set or the API call fails. |
+| `jobwatch tg-sync` | Drains Telegram replies since the last run and applies any status/notes changes found (see above), then exits. Intended to be called by cron. |
 
 All commands accept `-config path/to/config.yaml` (default `config.yaml`).
 
@@ -132,6 +164,9 @@ All commands accept `-config path/to/config.yaml` (default `config.yaml`).
   `ignored`) so they're never re-evaluated or re-notified on subsequent
   polls — only jobs that pass filters get status `new` and a notification.
 - SQLite runs in WAL mode; all writes go through explicit transactions.
+- `tg-sync`'s Telegram offset (so replies aren't reprocessed) is persisted
+  in a small `kv` table; each reply's job lookup and status/notes update
+  run in one transaction, committed before the confirmation is sent.
 
 ## Development
 

@@ -157,13 +157,15 @@ func (p *Poller) pollCompany(ctx context.Context, company config.Company, backfi
 			status = store.StatusNew
 		}
 
-		if _, err := p.Store.InsertJob(ctx, tx, job, status); err != nil {
+		id, err := p.Store.InsertJob(ctx, tx, job, status)
+		if err != nil {
 			slog.Error("inserting job", "company", company.Name, "external_id", job.ExternalID, "error", err)
 			continue
 		}
 
 		newCount++
 		if passes && !backfill {
+			job.ID = id
 			inserted = append(inserted, job)
 		}
 	}

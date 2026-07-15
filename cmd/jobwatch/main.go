@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	"jobwatch/internal/notify"
 	"jobwatch/internal/poller"
 	"jobwatch/internal/store"
+	"jobwatch/internal/tgsync"
 	"jobwatch/internal/web"
 )
 
@@ -40,6 +42,8 @@ func main() {
 		err = runServe(args)
 	case "test-notify":
 		err = runTestNotify(args)
+	case "tg-sync":
+		err = runTgSync(args)
 	case "-h", "--help", "help":
 		usage()
 		return
@@ -62,7 +66,8 @@ Usage:
   jobwatch poll        [-config config.yaml]   run one polling cycle, notify on new matches, then exit
   jobwatch backfill    [-config config.yaml]   poll and store everything as seen, without notifying
   jobwatch serve       [-config config.yaml]   run the dashboard web server
-  jobwatch test-notify [-config config.yaml]   send a test Telegram message and exit`)
+  jobwatch test-notify [-config config.yaml]   send a test Telegram message and exit
+  jobwatch tg-sync     [-config config.yaml]   drain Telegram replies and apply status/notes changes, then exit`)
 }
 
 func loadConfigFlag(fs *flag.FlagSet, args []string) (*config.Config, error) {
@@ -162,5 +167,46 @@ func runTestNotify(args []string) error {
 	}
 
 	slog.Info("test notification sent")
+	return nil
+}
+
+func runTgSync(args []string) error {
+	fs := flag.NewFlagSet("tg-sync", flag.ExitOnError)
+	cfg, err := loadConfigFlag(fs, args)
+	if err != nil {
+		return err
+	}
+
+	st, err := store.Open(cfg.DBPath)
+	if err != nil {
+		return fmt.Errorf("opening store: %w", err)
+	}
+	defer st.Close()
+
+	tg, err := notify.New(cfg.BotToken(), cfg.ChatID())
+	if err != nil {
+		return fmt.Errorf("telegram not configured: %w", err)
+	}
+
+	chatID, err := strconv.ParseInt(cfg.ChatID(), 10, 64)
+	if err != nil {
+		return fmt.Errorf("telegram chat id %q is not numeric: %w", cfg.ChatID(), err)
+	}
+
+	syncer := tgsync.New(st, tg, chatID)
+
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+
+	result, err := syncer.Run(ctx)
+	if err != nil {
+		return fmt.Errorf("tg-sync: %w", err)
+	}
+
+	slog.Info("tg-sync complete",
+		"processed", result.Processed,
+		"status_changes", result.StatusChanges,
+		"errors", result.Errors,
+	)
 	return nil
 }

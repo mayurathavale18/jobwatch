@@ -1,0 +1,36 @@
+[
+  {
+    "update_id": 100,
+    "message": {
+      "message_id": 501,
+      "chat": { "id": 555 },
+      "text": "applied",
+      "reply_to_message": {
+        "message_id": 500,
+        "chat": { "id": 555 },
+        "text": "<b>Stripe</b>\nBackend Engineer\nRemote\n<a href=\"https://stripe.com/jobs/1\">Apply here</a>\n#J1"
+      }
+    }
+  },
+  {
+    "update_id": 101,
+    "message": {
+      "message_id": 502,
+      "chat": { "id": 999 },
+      "text": "applied",
+      "reply_to_message": {
+        "message_id": 500,
+        "chat": { "id": 999 },
+        "text": "<b>Stripe</b>\nBackend Engineer\nRemote\n<a href=\"https://stripe.com/jobs/1\">Apply here</a>\n#J1"
+      }
+    }
+  },
+  {
+    "update_id": 102,
+    "message": {
+      "message_id": 503,
+      "chat": { "id": 555 },
+      "text": "hello there"
+    }
+  }
+]

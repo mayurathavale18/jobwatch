@@ -104,6 +104,11 @@ CREATE TABLE IF NOT EXISTS poll_runs (
 	new_jobs INTEGER NOT NULL DEFAULT 0,
 	errors TEXT NOT NULL DEFAULT ''
 );
+
+CREATE TABLE IF NOT EXISTS kv (
+	key TEXT PRIMARY KEY,
+	value TEXT NOT NULL
+);
 `
 	_, err := s.db.Exec(schema)
 	return err
@@ -175,18 +180,41 @@ func (s *Store) BeginTx(ctx context.Context) (*sql.Tx, error) {
 	return s.db.BeginTx(ctx, nil)
 }
 
+type execer interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
+
 // UpdateStatus sets a job's status.
 func (s *Store) UpdateStatus(ctx context.Context, id int64, status string) error {
+	return updateStatusExecer(ctx, s.db, id, status)
+}
+
+// UpdateStatusTx is UpdateStatus scoped to an open transaction (see ExistsTx
+// for why this is needed instead of UpdateStatus while a tx is open).
+func (s *Store) UpdateStatusTx(ctx context.Context, tx *sql.Tx, id int64, status string) error {
+	return updateStatusExecer(ctx, tx, id, status)
+}
+
+func updateStatusExecer(ctx context.Context, e execer, id int64, status string) error {
 	if !IsValidStatus(status) {
 		return fmt.Errorf("invalid status %q", status)
 	}
-	_, err := s.db.ExecContext(ctx, `UPDATE jobs SET status = ? WHERE id = ?`, status, id)
+	_, err := e.ExecContext(ctx, `UPDATE jobs SET status = ? WHERE id = ?`, status, id)
 	return err
 }
 
 // UpdateNotes sets a job's free-text notes.
 func (s *Store) UpdateNotes(ctx context.Context, id int64, notes string) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE jobs SET notes = ? WHERE id = ?`, notes, id)
+	return updateNotesExecer(ctx, s.db, id, notes)
+}
+
+// UpdateNotesTx is UpdateNotes scoped to an open transaction.
+func (s *Store) UpdateNotesTx(ctx context.Context, tx *sql.Tx, id int64, notes string) error {
+	return updateNotesExecer(ctx, tx, id, notes)
+}
+
+func updateNotesExecer(ctx context.Context, e execer, id int64, notes string) error {
+	_, err := e.ExecContext(ctx, `UPDATE jobs SET notes = ? WHERE id = ?`, notes, id)
 	return err
 }
 
@@ -258,8 +286,17 @@ func escapeLike(s string) string {
 
 // GetJob returns a single job by id.
 func (s *Store) GetJob(ctx context.Context, id int64) (JobRow, error) {
+	return getJobQuerier(ctx, s.db, id)
+}
+
+// GetJobTx is GetJob scoped to an open transaction.
+func (s *Store) GetJobTx(ctx context.Context, tx *sql.Tx, id int64) (JobRow, error) {
+	return getJobQuerier(ctx, tx, id)
+}
+
+func getJobQuerier(ctx context.Context, q querier, id int64) (JobRow, error) {
 	var j JobRow
-	err := s.db.QueryRowContext(ctx,
+	err := q.QueryRowContext(ctx,
 		`SELECT id, provider, company_slug, company_name, external_id, title, location, url, posted_at, first_seen_at, status, notes FROM jobs WHERE id = ?`,
 		id,
 	).Scan(&j.ID, &j.Provider, &j.CompanySlug, &j.CompanyName, &j.ExternalID,
@@ -353,4 +390,26 @@ func (s *Store) LastPollRun(ctx context.Context) (*PollRun, error) {
 		return nil, err
 	}
 	return &r, nil
+}
+
+// GetKV returns the value for key and whether it was present.
+func (s *Store) GetKV(ctx context.Context, key string) (string, bool, error) {
+	var value string
+	err := s.db.QueryRowContext(ctx, `SELECT value FROM kv WHERE key = ?`, key).Scan(&value)
+	if err == sql.ErrNoRows {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	return value, true, nil
+}
+
+// SetKV upserts a key/value pair.
+func (s *Store) SetKV(ctx context.Context, key, value string) error {
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO kv (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+		key, value,
+	)
+	return err
 }

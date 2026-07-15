@@ -5,10 +5,18 @@ companies:
   - name: "Razorpay"
     provider: greenhouse
     slug: razorpaysoftwareprivatelimited
-  # add more companies here — see README.md for how to find each slug
+  - name: "Databricks"
+    provider: greenhouse
+    slug: databricks
+  - name: "Elastic"
+    provider: greenhouse
+    slug: elastic
+  - name: "Cloudflare"
+    provider: greenhouse
+    slug: cloudflare
 
 filters:
-  include_keywords: ["backend", "software engineer", "sde", "platform", "golang", "python"]
+  include_keywords: ["backend", "software engineer", "sde", "swe", "platform", "golang", "python", "cloud", "infrastructure", "fullstack", "data engineer", "distributed systems", "forward deployed", "fde", "ai engineer", "ai platform", "llm", "machine learning engineer", "ml engineer", "mlops", "rag", "agent", "sre", "site reliability", "systems engineer", "devops", "solutions engineer", "microservices", "reliability engineer"]
   exclude_keywords: ["staff", "principal", "director", "manager", "intern", "10+ years"]
   locations_include: ["india", "hyderabad", "bengaluru", "bangalore", "remote"]
 

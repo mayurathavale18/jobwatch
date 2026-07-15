@@ -66,15 +66,49 @@ func TestSendFailure(t *testing.T) {
 
 func TestJobMessageFormat(t *testing.T) {
 	job := providers.Job{
+		ID:          42,
 		CompanyName: "Stripe",
 		Title:       "Backend Engineer",
 		Location:    "Remote",
 		URL:         "https://stripe.com/jobs/1",
 	}
 	got := JobMessage(job)
-	want := "<b>Stripe</b>\nBackend Engineer\nRemote\n<a href=\"https://stripe.com/jobs/1\">Apply here</a>"
+	want := "<b>Stripe</b>\nBackend Engineer\nRemote\n<a href=\"https://stripe.com/jobs/1\">Apply here</a>\n#J42"
 	if got != want {
 		t.Errorf("JobMessage =\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestExtractJobID(t *testing.T) {
+	tests := []struct {
+		name   string
+		text   string
+		wantID int64
+		wantOK bool
+	}{
+		{"tag present", "Some text\n#J123", 123, true},
+		{"tag in middle", "prefix #J7 suffix", 7, true},
+		{"absent", "no tag here", 0, false},
+		{"empty", "", 0, false},
+		{"malformed hash only", "#J", 0, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			id, ok := ExtractJobID(tt.text)
+			if ok != tt.wantOK || id != tt.wantID {
+				t.Errorf("ExtractJobID(%q) = (%d, %v), want (%d, %v)", tt.text, id, ok, tt.wantID, tt.wantOK)
+			}
+		})
+	}
+}
+
+func TestExtractJobIDInCaption(t *testing.T) {
+	// Same extraction function is used against either .Text or .Caption of
+	// the replied-to message; caption is just another string source.
+	caption := "<b>Stripe</b>\nBackend Engineer\nRemote\n<a href=\"https://x\">Apply here</a>\n#J99"
+	id, ok := ExtractJobID(caption)
+	if !ok || id != 99 {
+		t.Errorf("ExtractJobID(caption) = (%d, %v), want (99, true)", id, ok)
 	}
 }
 
