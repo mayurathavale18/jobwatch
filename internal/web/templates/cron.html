@@ -1,0 +1,73 @@
+{{define "cron.html"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>jobwatch — cron</title>
+<style>
+	:root { color-scheme: light dark; }
+	body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0; padding: 1.5rem; font-size: 14px; }
+	h1 { font-size: 1.1rem; margin: 0 0 0.75rem 0; }
+	nav.tabs { display: flex; gap: 1rem; margin-bottom: 1rem; }
+	nav.tabs a { text-decoration: none; color: inherit; opacity: 0.6; padding-bottom: 0.2rem; }
+	nav.tabs a.active { opacity: 1; font-weight: 600; border-bottom: 2px solid currentColor; }
+	table { width: 100%; border-collapse: collapse; }
+	th, td { text-align: left; padding: 0.5rem 0.6rem; border-bottom: 1px solid #8883; vertical-align: top; }
+	th { font-size: 0.75rem; text-transform: uppercase; opacity: 0.7; }
+	tr:hover { background: #8881; }
+	.muted { opacity: 0.65; font-size: 0.85em; }
+	.badge { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 999px; font-size: 0.8em; font-weight: 600; }
+	.badge-OK { background: #16a08522; color: #16a085; }
+	.badge-FAIL { background: #c0392b22; color: #c0392b; }
+	.badge-ALERT { background: #c0392b33; color: #c0392b; font-weight: 700; }
+	.badge-SKIP { background: #7f8c8d22; color: #7f8c8d; }
+	.badge-unknown { background: #7f8c8d22; color: #7f8c8d; }
+	.stale { color: #d35400; font-weight: 600; }
+	.detail { font-family: ui-monospace, monospace; font-size: 0.85em; opacity: 0.85; max-width: 40ch; overflow-wrap: anywhere; }
+</style>
+</head>
+<body>
+	<h1>jobwatch</h1>
+	<nav class="tabs">
+		<a href="/">Jobs</a>
+		<a href="/cron" class="active">Cron</a>
+	</nav>
+
+	<table>
+		<thead>
+			<tr>
+				<th>Job</th>
+				<th>Schedule</th>
+				<th>Status</th>
+				<th>Last run</th>
+				<th>Detail</th>
+			</tr>
+		</thead>
+		<tbody>
+			{{range .Jobs}}
+			<tr>
+				<td>{{.Name}}</td>
+				<td class="muted">{{.Schedule}}</td>
+				<td>
+					{{if .HasRun}}
+						<span class="badge badge-{{.Status}}">{{.Status}}</span>
+					{{else}}
+						<span class="badge badge-unknown">never run</span>
+					{{end}}
+				</td>
+				<td{{if .Stale}} class="stale"{{end}}>
+					{{if .HasRun}}
+						{{.LastRun.Local.Format "2006-01-02 15:04:05"}}
+						{{if .Stale}} (overdue){{end}}
+					{{else}}
+						<span class="muted">—</span>
+					{{end}}
+				</td>
+				<td class="detail">{{if .Detail}}{{.Detail}}{{else}}<span class="muted">—</span>{{end}}</td>
+			</tr>
+			{{end}}
+		</tbody>
+	</table>
+</body>
+</html>
+{{end}}

@@ -7,6 +7,7 @@
 .env
 .poll_failcount
 .tg-sync-failures
+.tailor-resume-failures
 /logs/
 /backups/
 resume/tailored.json

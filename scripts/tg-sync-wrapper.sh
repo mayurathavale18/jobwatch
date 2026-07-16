@@ -18,6 +18,7 @@ FAIL_COUNTER="$ROOT_DIR/.tg-sync-failures"
 cd "$ROOT_DIR"
 
 mkdir -p "$LOG_DIR"
+source "$SCRIPT_DIR/lib/status.sh"
 
 # Source env
 if [ -f "$ROOT_DIR/.env" ]; then
@@ -31,6 +32,7 @@ if [ -f "$LOCK_FILE" ]; then
   LOCK_PID=$(cat "$LOCK_FILE" 2>/dev/null)
   if kill -0 "$LOCK_PID" 2>/dev/null; then
     echo "TG_SYNC_SKIP: previous run (PID $LOCK_PID) still active"
+    write_status "tg-sync" "SKIP" "previous run (PID $LOCK_PID) still active"
     exit 0
   else
     rm -f "$LOCK_FILE"
@@ -54,6 +56,7 @@ if "$ROOT_DIR/bin/jobwatch" tg-sync -config "$ROOT_DIR/config.yaml" -fix-script 
   echo "0" > "$FAIL_COUNTER"
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] TG_SYNC_OK" >> "$LOG_FILE"
   echo "TG_SYNC_OK"
+  write_status "tg-sync" "OK" "$(tail -1 "$LOG_FILE" 2>/dev/null)"
 else
   EXIT_CODE=$?
   STDERR_TAIL=$(tail -5 "$STDERR_FILE" 2>/dev/null || echo "(no stderr)")
@@ -69,8 +72,10 @@ else
 
   if [ "$FAILURES" -ge 3 ]; then
     echo "TG_SYNC_ALERT: 3 consecutive failures. Last error: $STDERR_TAIL"
+    write_status "tg-sync" "ALERT" "3 consecutive failures. Last: $STDERR_TAIL"
   else
     echo "TG_SYNC_FAIL: failure $FAILURES/3. stderr: $STDERR_TAIL"
+    write_status "tg-sync" "FAIL" "failure $FAILURES/3: $STDERR_TAIL"
   fi
 fi
 

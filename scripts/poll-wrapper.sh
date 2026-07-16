@@ -1,16 +1,19 @@
 #!/bin/bash
 # Poll wrapper with failure tracking
 # Outputs status to stdout for the cron agent to read
-FAILCOUNT_FILE="$HOME/jobwatch/.poll_failcount"
-LOGFILE="$HOME/jobwatch/logs/poll-$(date +%Y%m%d).log"
+ROOT_DIR="$HOME/jobwatch"
+LOG_DIR="$ROOT_DIR/logs"
+FAILCOUNT_FILE="$ROOT_DIR/.poll_failcount"
+LOGFILE="$LOG_DIR/poll-$(date +%Y%m%d).log"
 
-mkdir -p "$HOME/jobwatch/logs"
+mkdir -p "$LOG_DIR"
+source "$ROOT_DIR/scripts/lib/status.sh"
 
 # Load env vars
-source "$HOME/jobwatch/.env"
+source "$ROOT_DIR/.env"
 
 # Run poll
-cd "$HOME/jobwatch"
+cd "$ROOT_DIR"
 OUTPUT=$(./bin/jobwatch poll 2>&1)
 EXIT_CODE=$?
 TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
@@ -30,12 +33,17 @@ if [ $EXIT_CODE -ne 0 ]; then
     
     if [ $FAILCOUNT -ge 3 ]; then
         echo "THREE_CONSECUTIVE_FAILURES"
+        write_status "poll" "ALERT" "3 consecutive failures. Last: $LAST_ERROR"
+    else
+        write_status "poll" "FAIL" "failure $FAILCOUNT/3: $LAST_ERROR"
     fi
 else
     echo "0" > "$FAILCOUNT_FILE"
     echo "POLL_OK"
     # Extract key stats from output
-    echo "$OUTPUT" | grep -E '"(new_jobs|companies_ok|companies_failed|duration)"' || true
+    STATS=$(echo "$OUTPUT" | grep -E '"(new_jobs|companies_ok|companies_failed|duration)"' || true)
+    echo "$STATS"
+    write_status "poll" "OK" "$STATS"
 fi
 
 exit $EXIT_CODE

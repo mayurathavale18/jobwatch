@@ -18,8 +18,9 @@ var templatesFS embed.FS
 
 // Server serves the dashboard.
 type Server struct {
-	store *store.Store
-	tmpl  *template.Template
+	store   *store.Store
+	tmpl    *template.Template
+	logsDir string
 }
 
 func NewServer(st *store.Store) (*Server, error) {
@@ -27,13 +28,17 @@ func NewServer(st *store.Store) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Server{store: st, tmpl: tmpl}, nil
+	// Relative to the process's cwd, same convention as config.yaml's
+	// db_path -- both assume `jobwatch serve` runs from the repo root
+	// (which is how the dashboard-watchdog wrapper always starts it).
+	return &Server{store: st, tmpl: tmpl, logsDir: "logs"}, nil
 }
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /", s.handleIndex)
 	mux.HandleFunc("PATCH /jobs/{id}", s.handlePatchJob)
+	mux.HandleFunc("GET /cron", s.handleCron)
 	return withLogging(mux)
 }
 

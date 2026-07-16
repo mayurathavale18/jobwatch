@@ -1,7 +1,11 @@
 #!/bin/bash
 # Daily summary script — queries DB read-only, outputs formatted text
-cd "$HOME/jobwatch"
-source "$HOME/jobwatch/.env"
+ROOT_DIR="$HOME/jobwatch"
+LOG_DIR="$ROOT_DIR/logs"
+cd "$ROOT_DIR"
+mkdir -p "$LOG_DIR"
+source "$ROOT_DIR/scripts/lib/status.sh"
+source "$ROOT_DIR/.env"
 
 echo "=== JOBWATCH DAILY SUMMARY $(date +%Y-%m-%d) ==="
 echo ""
@@ -45,3 +49,5 @@ if queued:
     print(f'  Queued for tomorrow: {len(queued)}')
 " 2>/dev/null
 fi
+
+write_status "daily-summary" "OK" "generated $(date -u +%Y-%m-%dT%H:%M:%SZ)"

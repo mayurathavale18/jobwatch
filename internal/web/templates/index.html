@@ -31,10 +31,17 @@
 	a.title-link { color: inherit; text-decoration: none; font-weight: 500; }
 	a.title-link:hover { text-decoration: underline; }
 	.muted { opacity: 0.65; font-size: 0.85em; }
+	nav.tabs { display: flex; gap: 1rem; margin-bottom: 1rem; }
+	nav.tabs a { text-decoration: none; color: inherit; opacity: 0.6; padding-bottom: 0.2rem; }
+	nav.tabs a.active { opacity: 1; font-weight: 600; border-bottom: 2px solid currentColor; }
 </style>
 </head>
 <body>
 	<h1>jobwatch</h1>
+	<nav class="tabs">
+		<a href="/" class="active">Jobs</a>
+		<a href="/cron">Cron</a>
+	</nav>
 
 	<div class="stats">
 		<span>Total: <span class="count">{{.TotalJobs}}</span></span>

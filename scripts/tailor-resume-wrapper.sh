@@ -21,6 +21,7 @@ cd "$ROOT_DIR"
 FAIL_COUNTER="$ROOT_DIR/.tailor-resume-failures"
 
 mkdir -p "$LOG_DIR"
+source "$SCRIPT_DIR/lib/status.sh"
 
 if [ -f "$ROOT_DIR/.env" ]; then
   set -a
@@ -33,6 +34,7 @@ if [ -f "$LOCK_FILE" ]; then
   LOCK_PID=$(cat "$LOCK_FILE" 2>/dev/null)
   if kill -0 "$LOCK_PID" 2>/dev/null; then
     echo "TAILOR_SKIP: previous run (PID $LOCK_PID) still active"
+    write_status "tailor-resume" "SKIP" "previous run (PID $LOCK_PID) still active"
     exit 0
   else
     rm -f "$LOCK_FILE"
@@ -50,6 +52,7 @@ if python3 "$SCRIPT_DIR/tailor_resume.py" >> "$LOG_FILE" 2>"$STDERR_FILE"; then
   echo "0" > "$FAIL_COUNTER"
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] TAILOR_OK" >> "$LOG_FILE"
   echo "TAILOR_OK"
+  write_status "tailor-resume" "OK" "$(tail -1 "$LOG_FILE" 2>/dev/null)"
 else
   EXIT_CODE=$?
   STDERR_TAIL=$(tail -5 "$STDERR_FILE" 2>/dev/null || echo "(no stderr)")
@@ -64,8 +67,10 @@ else
 
   if [ "$FAILURES" -ge 3 ]; then
     echo "TAILOR_ALERT: 3 consecutive failures. Last error: $STDERR_TAIL"
+    write_status "tailor-resume" "ALERT" "3 consecutive failures. Last: $STDERR_TAIL"
   else
     echo "TAILOR_FAIL: failure $FAILURES/3. stderr: $STDERR_TAIL"
+    write_status "tailor-resume" "FAIL" "failure $FAILURES/3: $STDERR_TAIL"
   fi
 fi
 
