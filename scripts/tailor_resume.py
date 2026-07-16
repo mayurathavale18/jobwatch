@@ -131,15 +131,18 @@ KEYWORD_CANDIDATES = {
     "knn", "bm25", "hybrid retrieval",
     # Frontend
     "react", "next.js", "nextjs", "vite", "nx", "react native", "expo", "pwa",
+    "full stack", "fullstack", "frontend",
     # Concepts
     "distributed systems", "system design", "concurrency", "multi-tenant", "multitenant",
     "secure coding", "solid", "resiliency", "observability", "metrics", "logging", "tracing",
     "monitoring", "alerting", "dashboards", "reliability", "scalability", "performance",
-    "idempotency", "retries", "dead-letter", "dlq",
+    "idempotency", "retries", "dead-letter", "dlq", "prompt engineering",
     # Role-specific
     "forward deployed engineer", "fde", "solutions engineer", "solutions architect",
     "data engineer", "backend engineer", "software engineer", "sre", "site reliability",
     "security", "networking", "billing", "finance",
+    # Recognized-only gaps (not in truthful_skills -- real, not fabricated)
+    "payments", "risk", "fraud", "c++", "ai security", "prompt injection", "jailbreak",
 }
 
 def normalize_keyword(kw):
@@ -193,6 +196,7 @@ def score_coverage(keywords, resume_text):
                 "agent", "agents", "agentic", "litellm", "mcp", "vector search", "embedding", "embeddings",
                 "knn", "bm25", "hybrid retrieval",
                 "react", "next.js", "nextjs", "vite", "nx", "react native", "expo", "pwa",
+                "full stack", "fullstack", "frontend", "prompt engineering",
                 "distributed systems", "system design", "concurrency", "multi-tenant", "multitenant",
                 "secure coding", "solid", "resiliency", "observability", "metrics", "logging", "tracing",
                 "monitoring", "alerting", "reliability", "scalability", "performance",
@@ -235,6 +239,8 @@ def determine_focus(jd_text, title):
         focus.append("backend")
     if any(k in text for k in ["billing", "finance", "payments"]):
         focus.append("billing_finance")
+    if any(k in text for k in ["full stack", "fullstack", "frontend"]):
+        focus.append("full_stack")
     if not focus:
         focus.append("backend")
     return focus
@@ -311,6 +317,10 @@ def build_experience_bullets(focus, jd_keywords, tight=False):
         {
             "text": "Architected an \\textbf{agentic AI copilot} (FastAPI + LangGraph) that increased daily sales leads by \\textbf{200\\%+}; implemented 4 streaming strategies (SSE, AG-UI, LangGraph multi-mode).",
             "focus": ["ai_llm", "forward_deployed"],
+        },
+        {
+            "text": "Migrated \\textbf{Webpack module-federation microfrontends to Vite} with a custom build runtime in NX: build times/latencies down \\textbf{70\\%}, dev build + local startup down \\textbf{80\\%} (with HMR).",
+            "focus": ["frontend", "full_stack"],
         },
     ]
 
@@ -529,6 +539,22 @@ def load_tailored():
             return json.load(f)
     return {}
 
+def update_job_status(job_id, status):
+    """Flip a job's status in jobwatch.db once tailoring has resolved it, so
+    the dashboard stops showing it as 'new' forever (tailor_resume.py used to
+    only ever read the jobs table -- all progress lived in tailored.json,
+    completely decoupled from jobs.status). Guarded to WHERE status='new' so
+    this never clobbers a status the user already set via the dashboard or a
+    Telegram reply (applied/rejected/interview/offer/etc), including when
+    rebuild_one() re-runs for a job the user already actioned.
+    """
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        conn.execute("UPDATE jobs SET status = ? WHERE id = ? AND status = 'new'", (status, int(job_id)))
+        conn.commit()
+    finally:
+        conn.close()
+
 def save_tailored(data):
     TAILORED_JSON_PATH.parent.mkdir(parents=True, exist_ok=True)
     with open(TAILORED_JSON_PATH, "w", encoding="utf-8") as f:
@@ -636,6 +662,8 @@ def rebuild_one(job_id, reply_to_message_id=None):
                                      reply_to_message_id=reply_to_message_id)
     tailored[job_id]["telegram_error"] = None if tg_ok else tg_error
     save_tailored(tailored)
+    if tg_ok:
+        update_job_status(job_id, "shortlisted")
     return tg_ok, (None if tg_ok else tg_error)
 
 def main():
@@ -734,6 +762,7 @@ def main():
                 "tailored_date": datetime.now().isoformat(),
             }
             save_tailored(tailored)
+            update_job_status(jid, "ignored")
             skipped_non_eng += 1
             continue
 
@@ -830,6 +859,7 @@ def main():
         else:
             tailored[jid]["telegram_error"] = None
             save_tailored(tailored)
+            update_job_status(jid, "shortlisted")
 
         processed += 1
 

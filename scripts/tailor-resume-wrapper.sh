@@ -29,6 +29,13 @@ if [ -f "$ROOT_DIR/.env" ]; then
   set +a
 fi
 
+# cron's default PATH doesn't include ROOT_DIR, where the repo-local
+# tectonic binary lives -- without this, every run fails with "tectonic not
+# found" (silent since poll-wrapper.sh's own notifications are unaffected,
+# so it went unnoticed until the dashboard's cron tab or the Telegram PDF
+# silence gave it away).
+export PATH="$ROOT_DIR:$PATH"
+
 # Prevent concurrent runs
 if [ -f "$LOCK_FILE" ]; then
   LOCK_PID=$(cat "$LOCK_FILE" 2>/dev/null)
