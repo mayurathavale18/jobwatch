@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
+	"os/exec"
 	"strconv"
 	"strings"
 	"time"
@@ -40,10 +41,22 @@ type Syncer struct {
 	Store  *store.Store
 	TG     telegramClient
 	ChatID int64
+
+	// FixScript is the executable invoked when a user replies "fix" to a
+	// job notification: `FixScript <job_id> <telegram_message_id>`. It
+	// regenerates and resends that job's tailored resume PDF. Empty
+	// disables the feature (replies explaining it isn't configured).
+	//
+	// This is jobwatch's single Telegram consumer (see Run/GetUpdates),
+	// so "fix" is handled here rather than by a second, independent
+	// getUpdates poller -- two consumers racing for the same bot's
+	// updates means whichever polls first silently consumes the reply
+	// before the other ever sees it.
+	FixScript string
 }
 
-func New(st *store.Store, tg *notify.Telegram, chatID int64) *Syncer {
-	return &Syncer{Store: st, TG: tg, ChatID: chatID}
+func New(st *store.Store, tg *notify.Telegram, chatID int64, fixScript string) *Syncer {
+	return &Syncer{Store: st, TG: tg, ChatID: chatID, FixScript: fixScript}
 }
 
 // Result summarizes one sync run.
@@ -151,6 +164,13 @@ func (s *Syncer) processUpdate(ctx context.Context, upd notify.Update) (bool, er
 	text := strings.TrimSpace(msg.Text)
 	lower := strings.ToLower(text)
 
+	if lower == "fix" {
+		if err := tx.Rollback(); err != nil && err != sql.ErrTxDone {
+			return false, err
+		}
+		return false, s.runFix(ctx, jobID, msg.MessageID)
+	}
+
 	if strings.HasPrefix(lower, "note:") {
 		noteText := strings.TrimSpace(text[len("note:"):])
 		newNotes := appendNote(job.Notes, noteText, time.Now())
@@ -203,6 +223,44 @@ func ParseStatusKeyword(word string) (string, bool) {
 	default:
 		return "", false
 	}
+}
+
+// runFix invokes FixScript to regenerate and resend a job's tailored resume
+// PDF. The script itself sends the corrected PDF as its own Telegram
+// message (threaded as a reply to replyToMessageID), so runFix only needs
+// to ack immediately (regeneration + LaTeX compile takes a few seconds) and
+// report failure if the script errors.
+func (s *Syncer) runFix(ctx context.Context, jobID int64, replyToMessageID int64) error {
+	if s.FixScript == "" {
+		return s.TG.Reply(ctx, replyToMessageID, "Resume-fix isn't configured on this install.")
+	}
+
+	if err := s.TG.Reply(ctx, replyToMessageID, "Fixing layout, resending shortly…"); err != nil {
+		return err
+	}
+
+	fixCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(fixCtx, s.FixScript,
+		strconv.FormatInt(jobID, 10), strconv.FormatInt(replyToMessageID, 10))
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		slog.Error("tg-sync: fix script failed", "job_id", jobID, "error", err, "output", string(output))
+		return s.TG.Reply(ctx, replyToMessageID, fmt.Sprintf("Fix failed for #J%d: %s", jobID, lastLine(string(output))))
+	}
+	return nil
+}
+
+func lastLine(s string) string {
+	s = strings.TrimRight(s, "\n")
+	if idx := strings.LastIndexByte(s, '\n'); idx >= 0 {
+		s = s[idx+1:]
+	}
+	if len(s) > 200 {
+		s = s[:200]
+	}
+	return s
 }
 
 func appendNote(existing, note string, at time.Time) string {

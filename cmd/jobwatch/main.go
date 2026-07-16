@@ -172,6 +172,8 @@ func runTestNotify(args []string) error {
 
 func runTgSync(args []string) error {
 	fs := flag.NewFlagSet("tg-sync", flag.ExitOnError)
+	fixScript := fs.String("fix-script", "scripts/resume-fix.sh",
+		"path to the script invoked when a user replies \"fix\" to a job notification (empty disables the feature)")
 	cfg, err := loadConfigFlag(fs, args)
 	if err != nil {
 		return err
@@ -193,7 +195,7 @@ func runTgSync(args []string) error {
 		return fmt.Errorf("telegram chat id %q is not numeric: %w", cfg.ChatID(), err)
 	}
 
-	syncer := tgsync.New(st, tg, chatID)
+	syncer := tgsync.New(st, tg, chatID, *fixScript)
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()

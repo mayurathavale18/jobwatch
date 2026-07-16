@@ -2,3 +2,15 @@
 *.db
 *.db-shm
 *.db-wal
+
+# Local-only: secrets, runtime state, generated logs/backups, unrelated tools
+.env
+.poll_failcount
+.tg-sync-failures
+/logs/
+/backups/
+resume/tailored.json
+/tectonic
+/.serena/
+hermes_logs.txt
+__pycache__/
