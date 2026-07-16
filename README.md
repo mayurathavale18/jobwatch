@@ -5,11 +5,12 @@ new postings, filters them by keyword/location, stores them in SQLite,
 sends a Telegram notification per new match, and serves a local dashboard
 to track application status.
 
-Supported ATS providers: **Greenhouse**, **Lever**, **Ashby**.
+Supported ATS providers: **Greenhouse**, **Lever**, **Ashby**, **Workday**.
 
 ## Setup
 
-1. Build the binary:
+1. Build (this compiles the React dashboard first, then embeds it into the
+   Go binary — needs Go 1.25+ and Node 22+):
 
    ```sh
    make build
@@ -19,7 +20,10 @@ Supported ATS providers: **Greenhouse**, **Lever**, **Ashby**.
    location filters. See [Adding a company](#adding-a-company) below for how
    to find each provider's `slug`.
 
-3. Create a Telegram bot and get your chat ID (see below), then export:
+3. Create a Telegram bot and get your chat ID (see below). Copy
+   `.env.example` to `.env` and fill in both values (the cron wrapper
+   scripts and `deploy/jobwatch.service` both `source .env`), or just
+   `export` them directly in your shell:
 
    ```sh
    export JOBWATCH_TG_TOKEN="123456:ABC-DEF..."
@@ -75,8 +79,9 @@ Supported ATS providers: **Greenhouse**, **Lever**, **Ashby**.
 ## Adding a company
 
 Each entry in `config.yaml`'s `companies` list needs a `name`, a `provider`
-(`greenhouse`, `lever`, or `ashby`), and a `slug`. The slug is specific to
-each ATS and is usually visible in the company's careers page URL:
+(`greenhouse`, `lever`, `ashby`, or `workday`), and a `slug`. The slug is
+specific to each ATS and is usually visible in the company's careers page
+URL:
 
 - **Greenhouse**: careers pages are often `https://boards.greenhouse.io/{slug}`,
   or check the network tab for calls to
@@ -95,18 +100,103 @@ Note: Ashby's own docs describe the job board endpoint as `POST`, but the
 live API only accepts `GET` (a `POST` returns `401 Unauthorized`); this is
 what jobwatch actually does — verified against Ashby's own public board.
 
-## Cron example
+### Workday
 
-Run a poll every 15 minutes, and drain Telegram replies every 5:
+Workday needs two extra fields, `host` and `site`, because a Workday
+careers URL is `https://{slug}.{host}.myworkdayjobs.com/{site}` — three
+independent parts, not one slug:
 
-```cron
-*/15 * * * * cd /path/to/jobwatch && ./bin/jobwatch poll -config config.yaml >> poll.log 2>&1
-*/5  * * * * cd /path/to/jobwatch && ./bin/jobwatch tg-sync -config config.yaml >> tgsync.log 2>&1
+```yaml
+- name: "Wells Fargo"
+  provider: workday
+  slug: wf
+  host: wd1
+  site: WellsFargoJobs
 ```
 
-Run the dashboard as a systemd user service or in a long-lived shell/tmux
-session with `make run-serve` — it binds to `127.0.0.1` only, so it's not
-exposed beyond your machine.
+To find these for a company: open their careers page, watch the network
+tab for a `POST .../wday/cxs/{tenant}/{site}/jobs` request, and read
+`tenant`/`host`/`site` straight out of the URL. Not every company that
+"looks big" is actually on Workday — e.g. Oracle's own careers site runs on
+Oracle's own recruiting platform, not Workday, despite `myworkdayjobs.com`
+hosting plenty of *other* companies' Oracle-titled job postings. Verify
+with a real request before adding an entry:
+
+```sh
+curl -s -X POST "https://{slug}.{host}.myworkdayjobs.com/wday/cxs/{slug}/{site}/jobs" \
+  -H "Content-Type: application/json" -d '{"appliedFacets":{},"limit":5,"offset":0,"searchText":""}'
+```
+
+A `422` means the site name is wrong; a `200` with a `jobPostings` array
+means it's correct. Large employers can have thousands of open postings —
+jobwatch fetches up to 300 per company per poll cycle (most-recent-first),
+not the entire board; see the Design notes below.
+
+## Cron example
+
+See `deploy/crontab.example` for a ready-to-edit crontab covering polling,
+Telegram sync, the dashboard health-check watchdog, and weekly DB backups.
+Copy it, replace the placeholder path, and `crontab deploy/crontab.example`.
+
+The dashboard's Cron tab also has a "Run now" button per job — useful for
+triggering `tg-sync` outside its scheduled hours, or any job without
+waiting for its next tick, without touching the crontab at all.
+
+Run the dashboard itself as a systemd service (see Deployment below) or in
+a long-lived shell/tmux session with `make run-serve` — it binds to
+`127.0.0.1` only by default, so it's not reachable beyond the machine it
+runs on unless you change `dashboard.addr` in `config.yaml`.
+
+## Deployment (AWS, or any single Linux box)
+
+jobwatch is one Go binary + SQLite + a crontab — there's no database
+server, container orchestration, or multi-machine anything to set up. The
+whole thing runs comfortably on the smallest instance size available
+(e.g. a $3.50-5/mo AWS Lightsail instance, or a `t3.micro`/`t4g.micro` EC2
+instance within the free tier).
+
+1. Spin up an Ubuntu 22.04 or 24.04 instance (Lightsail or EC2).
+2. Clone this repo onto it, e.g. to `/opt/jobwatch`.
+3. Run the bootstrap script as root:
+
+   ```sh
+   cd /opt/jobwatch
+   sudo bash deploy/setup.sh
+   ```
+
+   This installs Go, Node, tectonic, and `pdfinfo`; creates a dedicated
+   `jobwatch` system user; builds the frontend + binary; installs
+   `deploy/jobwatch.service` (systemd, auto-restart on crash); and installs
+   `deploy/crontab.example`'s **core** jobs (poll, tg-sync,
+   dashboard-watchdog, weekly-backup) for that user. It does *not* enable
+   the resume-tailoring cron — that's commented out in the crontab
+   template since it needs your own `resume/master.tex` + `resume/facts.md`
+   (see below), not something to inherit from whoever you forked this
+   from.
+4. Edit `.env` (from `.env.example`) with your real Telegram bot token +
+   chat id, and `config.yaml` with your companies/keywords/locations.
+5. Seed the database once so you don't get flooded with notifications for
+   every job that already exists:
+
+   ```sh
+   sudo -u jobwatch /opt/jobwatch/bin/jobwatch backfill -config /opt/jobwatch/config.yaml
+   ```
+
+6. Start it: `systemctl start jobwatch` — then `systemctl status jobwatch`
+   and `curl -s localhost:8787 | head -c 200` to confirm it's up.
+
+**Reaching the dashboard remotely:** it has no authentication, so don't
+open its port to the internet. Either keep it to `127.0.0.1` and reach it
+over an SSH tunnel (`ssh -L 8787:localhost:8787 your-instance`), or put it
+behind something that does its own auth (a reverse proxy with basic auth,
+a VPN, Tailscale, etc.) if you want browser access without tunneling every
+time.
+
+**Sharing this with friends:** each person runs their own instance from
+their own fork/clone — their own AWS box, their own `config.yaml` (own
+companies/keywords), their own Telegram bot, their own `.env`. There's no
+shared/multi-tenant deployment model here; `deploy/setup.sh` and this
+README are the "product" being shared, not a hosted service.
 
 ## Two-way status control via Telegram
 
@@ -153,13 +243,22 @@ All commands accept `-config path/to/config.yaml` (default `config.yaml`).
 ## Design notes
 
 - Providers are normalized into one `Job` struct in `internal/providers`.
-  Adding a fourth ATS (e.g. Workday) means implementing the `Provider`
-  interface (`Fetch(ctx, company) ([]Job, error)`) in one new file.
+  Adding another ATS means implementing the `Provider` interface
+  (`Fetch(ctx, company) ([]Job, error)`) in one new file.
 - Dedupe key is `(provider, company_slug, external_id)`, enforced both by a
   SQLite `UNIQUE` constraint and an explicit existence check before insert.
 - Polling fans out to at most 5 companies concurrently (semaphore-bounded),
-  with a 15s timeout per HTTP request. A failure on one company is logged
-  and skipped — it never aborts the whole cycle.
+  with a 60s timeout per company (sized for Workday's pagination — up to 15
+  sequential requests per company — not just a single HTTP call). A failure
+  on one company is logged and skipped — it never aborts the whole cycle.
+- The dashboard (`internal/web`) is a Vite+React SPA built to
+  `internal/web/dist/` and embedded into the Go binary via `go:embed` —
+  `make build` builds the frontend first, since the embed directive needs
+  that directory to exist at compile time. The Go side only exposes a JSON
+  API (`GET /api/jobs`, `PATCH /api/jobs/{id}`, `GET /api/cron`,
+  `POST /api/cron/{name}/run`); there's no server-rendered HTML or
+  templating left. `frontend/node_modules/` and `internal/web/dist/` are
+  gitignored build artifacts — regenerated by `make build`, not committed.
 - New jobs that fail the configured filters are still stored (status
   `ignored`) so they're never re-evaluated or re-notified on subsequent
   polls — only jobs that pass filters get status `new` and a notification.

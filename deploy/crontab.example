@@ -1,0 +1,28 @@
+# jobwatch crontab template. Replace /opt/jobwatch below with wherever you
+# deployed the repo, then install with: crontab deploy/crontab.example
+# (after editing the path). Times are in the system's local timezone.
+
+# --- Core (works out of the box, no personal setup needed) ---
+
+# Poll job boards every 15 minutes
+*/15 * * * * /opt/jobwatch/scripts/poll-wrapper.sh >> /opt/jobwatch/logs/cron.log 2>&1
+
+# Drain Telegram replies (status changes, notes, "fix") every 5 min, 07:00-24:00 local time
+*/5 7-23 * * * /opt/jobwatch/scripts/tg-sync-wrapper.sh >> /opt/jobwatch/logs/cron.log 2>&1
+
+# Dashboard health check + auto-restart every 10 minutes
+*/10 * * * * /opt/jobwatch/scripts/dashboard-watchdog.sh >> /opt/jobwatch/logs/cron.log 2>&1
+
+# --- Optional: resume auto-tailoring pipeline ---
+# Requires YOUR OWN resume/master.tex + resume/facts.md (see README) --
+# without them this will generate resumes from someone else's facts.md, or
+# just fail. Leave commented out until you've set those up.
+
+# Generate tailored resume PDFs for new jobs every 30 minutes
+# */30 * * * * /opt/jobwatch/scripts/tailor-resume-wrapper.sh >> /opt/jobwatch/logs/cron.log 2>&1
+
+# Daily summary at 23:50 local time
+# 50 23 * * * /opt/jobwatch/scripts/daily-summary.sh >> /opt/jobwatch/logs/daily-summary.log 2>&1
+
+# Weekly DB backup, Sunday 02:00 local time
+0 2 * * 0 /opt/jobwatch/scripts/weekly-backup.sh >> /opt/jobwatch/logs/weekly-backup.log 2>&1

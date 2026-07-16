@@ -1,0 +1,17 @@
+[Unit]
+Description=jobwatch dashboard
+After=network.target
+
+[Service]
+Type=simple
+User=jobwatch
+WorkingDirectory=/opt/jobwatch
+# .env uses `export KEY=value` (shell syntax, shared with the cron wrapper
+# scripts' own `source .env`) -- systemd's EnvironmentFile directive can't
+# parse that directly, so source it the same way instead.
+ExecStart=/bin/bash -c 'source /opt/jobwatch/.env && exec /opt/jobwatch/bin/jobwatch serve -config /opt/jobwatch/config.yaml'
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
