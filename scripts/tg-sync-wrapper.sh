@@ -12,6 +12,11 @@ LOG_DIR="$ROOT_DIR/logs"
 LOCK_FILE="$ROOT_DIR/.tg-sync.lock"
 FAIL_COUNTER="$ROOT_DIR/.tg-sync-failures"
 
+# config.yaml's db_path is relative ("./jobwatch.db"); cron's default cwd is
+# $HOME, not this repo, so without this cd the jobwatch binary silently
+# opened/created an empty db at $HOME/jobwatch.db instead of the real one.
+cd "$ROOT_DIR"
+
 mkdir -p "$LOG_DIR"
 
 # Source env
