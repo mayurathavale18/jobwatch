@@ -59,8 +59,15 @@ type wdPosting struct {
 }
 
 func (w *Workday) Fetch(ctx context.Context, company config.Company) ([]Job, error) {
-	baseURL := fmt.Sprintf("https://%s.%s.myworkdayjobs.com/wday/cxs/%s/%s",
+	// apiBaseURL is the CXS search API (JSON, POST-only). publicBaseURL is
+	// the actual browsable careers site -- the two share a host but the API
+	// lives under an extra /wday/cxs/{tenant} segment. Job URLs must use
+	// publicBaseURL: linking to the API path opens raw JSON in a browser
+	// instead of the real job page.
+	apiBaseURL := fmt.Sprintf("https://%s.%s.myworkdayjobs.com/wday/cxs/%s/%s",
 		company.Slug, company.Host, company.Slug, company.Site)
+	publicBaseURL := fmt.Sprintf("https://%s.%s.myworkdayjobs.com/%s",
+		company.Slug, company.Host, company.Site)
 
 	var all []wdPosting
 	total := -1 // Workday only reports an accurate "total" on the first page; later pages report 0
@@ -74,7 +81,7 @@ func (w *Workday) Fetch(ctx context.Context, company config.Company) ([]Job, err
 			return nil, fmt.Errorf("workday %s: encode request: %w", company.Slug, err)
 		}
 
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/jobs", bytes.NewReader(reqBody))
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiBaseURL+"/jobs", bytes.NewReader(reqBody))
 		if err != nil {
 			return nil, err
 		}
@@ -106,7 +113,7 @@ func (w *Workday) Fetch(ctx context.Context, company config.Company) ([]Job, err
 		}
 	}
 
-	return parseWorkday(all, baseURL, company)
+	return parseWorkday(all, publicBaseURL, company)
 }
 
 func parseWorkdayJSON(data []byte, baseURL string, company config.Company) ([]Job, error) {

@@ -112,7 +112,9 @@ func TestParseAshby(t *testing.T) {
 func TestParseWorkday(t *testing.T) {
 	data := readFixture(t, "testdata/workday/wellsfargo_sample.json")
 	company := config.Company{Name: "Wells Fargo", Provider: "workday", Slug: "wf", Host: "wd1", Site: "WellsFargoJobs"}
-	baseURL := "https://wf.wd1.myworkdayjobs.com/wday/cxs/wf/WellsFargoJobs"
+	// The public careers site, not the /wday/cxs/{tenant} API path -- linking
+	// to the API returns raw JSON in a browser instead of the real job page.
+	baseURL := "https://wf.wd1.myworkdayjobs.com/WellsFargoJobs"
 
 	jobs, err := parseWorkdayJSON(data, baseURL, company)
 	if err != nil {
