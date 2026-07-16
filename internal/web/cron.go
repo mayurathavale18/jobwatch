@@ -2,7 +2,6 @@ package web
 
 import (
 	"encoding/json"
-	"net/http"
 	"os"
 	"path/filepath"
 	"time"
@@ -17,15 +16,25 @@ type cronJob struct {
 	Name     string
 	Schedule string
 	Interval time.Duration // expected time between runs, used to flag staleness
+	Script   string        // path (relative to repo root) the "run now" button executes
 }
 
 var cronJobDefs = []cronJob{
-	{"poll", "every 15 min", 15 * time.Minute},
-	{"tg-sync", "every 5 min, 07:00–24:00 IST", 5 * time.Minute},
-	{"tailor-resume", "every 30 min", 30 * time.Minute},
-	{"dashboard-watchdog", "every 10 min", 10 * time.Minute},
-	{"daily-summary", "23:50 IST daily", 24 * time.Hour},
-	{"weekly-backup", "Sunday 02:00 IST", 7 * 24 * time.Hour},
+	{"poll", "every 15 min", 15 * time.Minute, "scripts/poll-wrapper.sh"},
+	{"tg-sync", "every 5 min, 07:00–24:00 IST", 5 * time.Minute, "scripts/tg-sync-wrapper.sh"},
+	{"tailor-resume", "every 30 min", 30 * time.Minute, "scripts/tailor-resume-wrapper.sh"},
+	{"dashboard-watchdog", "every 10 min", 10 * time.Minute, "scripts/dashboard-watchdog.sh"},
+	{"daily-summary", "23:50 IST daily", 24 * time.Hour, "scripts/daily-summary.sh"},
+	{"weekly-backup", "Sunday 02:00 IST", 7 * 24 * time.Hour, "scripts/weekly-backup.sh"},
+}
+
+func findCronJob(name string) (cronJob, bool) {
+	for _, j := range cronJobDefs {
+		if j.Name == name {
+			return j, true
+		}
+	}
+	return cronJob{}, false
 }
 
 // CronJobStatus is one job's status as shown on the Cron tab.
@@ -77,17 +86,4 @@ func (s *Server) loadCronStatuses() []CronJobStatus {
 	}
 
 	return out
-}
-
-type cronData struct {
-	Jobs []CronJobStatus
-}
-
-func (s *Server) handleCron(w http.ResponseWriter, r *http.Request) {
-	data := cronData{Jobs: s.loadCronStatuses()}
-
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := s.tmpl.ExecuteTemplate(w, "cron.html", data); err != nil {
-		httpError(w, "rendering cron template", err)
-	}
 }

@@ -1,45 +1,67 @@
-// Package web serves the local jobwatch dashboard.
+// Package web serves the local jobwatch dashboard: a React+Vite SPA (built
+// to dist/, embedded below) backed by a JSON API.
 package web
 
 import (
 	"context"
 	"embed"
-	"html/template"
+	"io/fs"
 	"log/slog"
 	"net/http"
-	"strconv"
 	"time"
 
 	"jobwatch/internal/store"
 )
 
-//go:embed templates/*.html
-var templatesFS embed.FS
+//go:embed dist
+var distFS embed.FS
 
 // Server serves the dashboard.
 type Server struct {
 	store   *store.Store
-	tmpl    *template.Template
+	dist    fs.FS
 	logsDir string
 }
 
 func NewServer(st *store.Store) (*Server, error) {
-	tmpl, err := template.ParseFS(templatesFS, "templates/*.html")
+	dist, err := fs.Sub(distFS, "dist")
 	if err != nil {
 		return nil, err
 	}
 	// Relative to the process's cwd, same convention as config.yaml's
 	// db_path -- both assume `jobwatch serve` runs from the repo root
 	// (which is how the dashboard-watchdog wrapper always starts it).
-	return &Server{store: st, tmpl: tmpl, logsDir: "logs"}, nil
+	return &Server{store: st, dist: dist, logsDir: "logs"}, nil
 }
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /", s.handleIndex)
-	mux.HandleFunc("PATCH /jobs/{id}", s.handlePatchJob)
-	mux.HandleFunc("GET /cron", s.handleCron)
+	mux.HandleFunc("GET /api/jobs", s.handleAPIJobs)
+	mux.HandleFunc("PATCH /api/jobs/{id}", s.handleAPIPatchJob)
+	mux.HandleFunc("GET /api/cron", s.handleAPICron)
+	mux.HandleFunc("POST /api/cron/{name}/run", s.handleAPICronRun)
+	mux.Handle("/", s.spaHandler())
 	return withLogging(mux)
+}
+
+// spaHandler serves the embedded Vite build: real files (JS/CSS/favicon) are
+// served as-is, and any other path (e.g. /cron, a client-side route) falls
+// back to index.html so the SPA's own routing takes over.
+func (s *Server) spaHandler() http.Handler {
+	fileServer := http.FileServer(http.FS(s.dist))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+		if path != "/" {
+			if _, err := fs.Stat(s.dist, path[1:]); err != nil {
+				r2 := new(http.Request)
+				*r2 = *r
+				r2.URL.Path = "/"
+				fileServer.ServeHTTP(w, r2)
+				return
+			}
+		}
+		fileServer.ServeHTTP(w, r)
+	})
 }
 
 func withLogging(next http.Handler) http.Handler {
@@ -47,110 +69,6 @@ func withLogging(next http.Handler) http.Handler {
 		next.ServeHTTP(w, r)
 		slog.Info("http request", "method", r.Method, "path", r.URL.Path)
 	})
-}
-
-type indexData struct {
-	Jobs          []store.JobRow
-	Companies     []string
-	StatusCounts  map[string]int
-	TotalJobs     int
-	LastPoll      *store.PollRun
-	Statuses      []string
-	FilterStatus  string
-	FilterCompany string
-	FilterSearch  string
-}
-
-func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	q := r.URL.Query()
-
-	filter := store.JobFilter{
-		Status:  q.Get("status"),
-		Company: q.Get("company"),
-		Search:  q.Get("q"),
-	}
-
-	jobs, err := s.store.ListJobs(ctx, filter)
-	if err != nil {
-		httpError(w, "listing jobs", err)
-		return
-	}
-
-	companies, err := s.store.CompanyNames(ctx)
-	if err != nil {
-		httpError(w, "listing companies", err)
-		return
-	}
-
-	counts, err := s.store.StatusCounts(ctx)
-	if err != nil {
-		httpError(w, "counting statuses", err)
-		return
-	}
-
-	total := 0
-	for _, n := range counts {
-		total += n
-	}
-
-	lastPoll, err := s.store.LastPollRun(ctx)
-	if err != nil {
-		httpError(w, "loading last poll run", err)
-		return
-	}
-
-	data := indexData{
-		Jobs:          jobs,
-		Companies:     companies,
-		StatusCounts:  counts,
-		TotalJobs:     total,
-		LastPoll:      lastPoll,
-		Statuses:      store.ValidStatuses,
-		FilterStatus:  filter.Status,
-		FilterCompany: filter.Company,
-		FilterSearch:  filter.Search,
-	}
-
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := s.tmpl.ExecuteTemplate(w, "index.html", data); err != nil {
-		slog.Error("rendering index template", "error", err)
-	}
-}
-
-func (s *Server) handlePatchJob(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-
-	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	if err != nil {
-		http.Error(w, "invalid job id", http.StatusBadRequest)
-		return
-	}
-
-	if err := r.ParseForm(); err != nil {
-		http.Error(w, "invalid form", http.StatusBadRequest)
-		return
-	}
-
-	if status := r.Form.Get("status"); status != "" {
-		if !store.IsValidStatus(status) {
-			http.Error(w, "invalid status", http.StatusBadRequest)
-			return
-		}
-		if err := s.store.UpdateStatus(ctx, id, status); err != nil {
-			httpError(w, "updating status", err)
-			return
-		}
-	}
-
-	if r.Form.Has("notes") {
-		if err := s.store.UpdateNotes(ctx, id, r.Form.Get("notes")); err != nil {
-			httpError(w, "updating notes", err)
-			return
-		}
-	}
-
-	w.WriteHeader(http.StatusOK)
 }
 
 func httpError(w http.ResponseWriter, msg string, err error) {

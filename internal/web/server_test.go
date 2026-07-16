@@ -4,9 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -53,9 +51,8 @@ func insertTestJob(t *testing.T, st *store.Store) int64 {
 	return id
 }
 
-func TestHandleIndexRenders(t *testing.T) {
-	srv, st := newTestServer(t)
-	insertTestJob(t, st)
+func TestHandleIndexServesSPAShell(t *testing.T) {
+	srv, _ := newTestServer(t)
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	w := httptest.NewRecorder()
@@ -65,71 +62,22 @@ func TestHandleIndexRenders(t *testing.T) {
 		t.Fatalf("status = %d, want 200", w.Code)
 	}
 	body := w.Body.String()
-	if !strings.Contains(body, "Backend Engineer") {
-		t.Errorf("expected body to contain job title, got:\n%s", body)
-	}
 	if !strings.Contains(body, "jobwatch") {
-		t.Errorf("expected body to contain page title")
+		t.Errorf("expected embedded index.html to contain page title, got:\n%s", body)
 	}
 }
 
-func TestHandlePatchJobUpdatesStatus(t *testing.T) {
-	srv, st := newTestServer(t)
-	id := insertTestJob(t, st)
+func TestHandleCronPathFallsBackToSPAShell(t *testing.T) {
+	srv, _ := newTestServer(t)
 
-	form := url.Values{"status": {store.StatusApplied}}
-	req := httptest.NewRequest(http.MethodPatch, "/jobs/"+strconv.FormatInt(id, 10), strings.NewReader(form.Encode()))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req := httptest.NewRequest(http.MethodGet, "/cron", nil)
 	w := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200, body=%s", w.Code, w.Body.String())
+		t.Fatalf("status = %d, want 200", w.Code)
 	}
-
-	got, err := st.GetJob(context.Background(), id)
-	if err != nil {
-		t.Fatalf("GetJob: %v", err)
-	}
-	if got.Status != store.StatusApplied {
-		t.Errorf("Status = %q, want %q", got.Status, store.StatusApplied)
-	}
-}
-
-func TestHandlePatchJobUpdatesNotes(t *testing.T) {
-	srv, st := newTestServer(t)
-	id := insertTestJob(t, st)
-
-	form := url.Values{"notes": {"applied via referral"}}
-	req := httptest.NewRequest(http.MethodPatch, "/jobs/"+strconv.FormatInt(id, 10), strings.NewReader(form.Encode()))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	w := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200, body=%s", w.Code, w.Body.String())
-	}
-
-	got, err := st.GetJob(context.Background(), id)
-	if err != nil {
-		t.Fatalf("GetJob: %v", err)
-	}
-	if got.Notes != "applied via referral" {
-		t.Errorf("Notes = %q", got.Notes)
-	}
-}
-
-func TestHandlePatchJobRejectsInvalidStatus(t *testing.T) {
-	srv, st := newTestServer(t)
-	id := insertTestJob(t, st)
-
-	form := url.Values{"status": {"bogus"}}
-	req := httptest.NewRequest(http.MethodPatch, "/jobs/"+strconv.FormatInt(id, 10), strings.NewReader(form.Encode()))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	w := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(w, req)
-
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("status = %d, want 400", w.Code)
+	if !strings.Contains(w.Body.String(), "jobwatch") {
+		t.Errorf("expected /cron to fall back to the SPA shell, got:\n%s", w.Body.String())
 	}
 }

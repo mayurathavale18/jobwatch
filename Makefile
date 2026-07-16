@@ -1,9 +1,12 @@
-.PHONY: build test run-serve poll backfill test-notify clean
+.PHONY: build frontend test run-serve poll backfill test-notify clean
 
 BINARY := jobwatch
 CONFIG := config.yaml
 
-build:
+frontend:
+	cd frontend && npm install && npm run build
+
+build: frontend
 	go build -o bin/$(BINARY) ./cmd/jobwatch
 
 test:

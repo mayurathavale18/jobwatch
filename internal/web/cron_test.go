@@ -1,11 +1,8 @@
 package web
 
 import (
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 )
@@ -84,24 +81,4 @@ func TestLoadCronStatusesFlagsStale(t *testing.T) {
 		}
 	}
 	t.Fatal("poll status not found")
-}
-
-func TestHandleCronRenders(t *testing.T) {
-	srv, _ := newTestServer(t)
-	srv.logsDir = t.TempDir()
-
-	req := httptest.NewRequest(http.MethodGet, "/cron", nil)
-	w := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", w.Code)
-	}
-	body := w.Body.String()
-	if !strings.Contains(body, "tg-sync") {
-		t.Errorf("expected body to list tg-sync job, got:\n%s", body)
-	}
-	if !strings.Contains(body, "never run") {
-		t.Errorf("expected 'never run' badge for jobs with no status file")
-	}
 }

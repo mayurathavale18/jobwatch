@@ -15,3 +15,9 @@ resume/tailored.json
 /.serena/
 hermes_logs.txt
 __pycache__/
+
+# Frontend: source is committed, build output and deps are not.
+# `make build` (or `make frontend`) regenerates internal/web/dist before
+# `go build`, since the Go server embeds it via go:embed.
+frontend/node_modules/
+/internal/web/dist/
