@@ -14,6 +14,11 @@ companies:
   - name: "Cloudflare"
     provider: greenhouse
     slug: cloudflare
+  - name: "Wells Fargo"
+    provider: workday
+    slug: wf
+    host: wd1
+    site: WellsFargoJobs
 
 filters:
   include_keywords: ["backend", "software engineer", "sde", "swe", "platform", "golang", "python", "cloud", "infrastructure", "fullstack", "full stack", "data engineer", "distributed systems", "forward deployed", "fde", "ai engineer", "ai platform", "llm", "machine learning engineer", "ml engineer", "mlops", "rag", "agent", "sre", "site reliability", "systems engineer", "devops", "solutions engineer", "microservices", "reliability engineer"]

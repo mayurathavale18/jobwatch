@@ -109,6 +109,44 @@ func TestParseAshby(t *testing.T) {
 	}
 }
 
+func TestParseWorkday(t *testing.T) {
+	data := readFixture(t, "testdata/workday/wellsfargo_sample.json")
+	company := config.Company{Name: "Wells Fargo", Provider: "workday", Slug: "wf", Host: "wd1", Site: "WellsFargoJobs"}
+	baseURL := "https://wf.wd1.myworkdayjobs.com/wday/cxs/wf/WellsFargoJobs"
+
+	jobs, err := parseWorkdayJSON(data, baseURL, company)
+	if err != nil {
+		t.Fatalf("parseWorkdayJSON: %v", err)
+	}
+	if len(jobs) != 2 {
+		t.Fatalf("expected 2 jobs, got %d", len(jobs))
+	}
+
+	j := jobs[0]
+	if j.Provider != "workday" {
+		t.Errorf("Provider = %q, want workday", j.Provider)
+	}
+	if j.CompanySlug != "wf" || j.CompanyName != "Wells Fargo" {
+		t.Errorf("company fields wrong: slug=%q name=%q", j.CompanySlug, j.CompanyName)
+	}
+	if j.ExternalID != "R-100001" {
+		t.Errorf("ExternalID = %q, want R-100001 (bulletFields[0], not externalPath)", j.ExternalID)
+	}
+	if j.Title != "Software Engineer, Backend Platform" {
+		t.Errorf("Title = %q", j.Title)
+	}
+	if j.Location != "BENGALURU, India" {
+		t.Errorf("Location = %q", j.Location)
+	}
+	wantURL := baseURL + "/job/BENGALURU-India/Software-Engineer--Backend-Platform_R-100001"
+	if j.URL != wantURL {
+		t.Errorf("URL = %q, want %q", j.URL, wantURL)
+	}
+	if j.PostedAt != nil {
+		t.Errorf("PostedAt = %v, want nil (Workday only exposes relative text, not a timestamp)", j.PostedAt)
+	}
+}
+
 func TestParseAshbySkipsUnlisted(t *testing.T) {
 	data := []byte(`{"jobs":[
 		{"id":"1","title":"Listed Job","location":"Remote","jobUrl":"https://x/1","isListed":true},

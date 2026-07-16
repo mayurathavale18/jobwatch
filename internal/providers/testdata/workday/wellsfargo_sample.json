@@ -1,0 +1,19 @@
+{
+  "total": 2,
+  "jobPostings": [
+    {
+      "title": "Software Engineer, Backend Platform",
+      "externalPath": "/job/BENGALURU-India/Software-Engineer--Backend-Platform_R-100001",
+      "locationsText": "BENGALURU, India",
+      "postedOn": "Posted Today",
+      "bulletFields": ["R-100001", "Posting End Date: 08/01/2026"]
+    },
+    {
+      "title": "Branch Manager Eastern Wyoming District",
+      "externalPath": "/job/CHEYENNE-WY/Branch-Manager-Eastern-Wyoming-District_R-561638",
+      "locationsText": "2 Locations",
+      "postedOn": "Posted Today",
+      "bulletFields": ["R-561638", "Posting End Date: 08/27/2026"]
+    }
+  ]
+}

@@ -15,7 +15,10 @@ import (
 
 const (
 	maxConcurrency = 5
-	requestTimeout = 15 * time.Second
+	// Workday's provider makes up to workdayMaxPages sequential requests
+	// (~1s each) per company, well past what a single Greenhouse/Lever/Ashby
+	// request needs -- sized for that instead of the single-request case.
+	requestTimeout = 60 * time.Second
 )
 
 // Notifier is the subset of *notify.Telegram the poller needs, so tests can

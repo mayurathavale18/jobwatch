@@ -35,7 +35,7 @@ type Provider interface {
 }
 
 // ForName returns the Provider implementation for the given provider name
-// ("greenhouse", "lever", "ashby"), as configured in config.yaml.
+// ("greenhouse", "lever", "ashby", "workday"), as configured in config.yaml.
 func ForName(name string) Provider {
 	switch name {
 	case "greenhouse":
@@ -44,6 +44,8 @@ func ForName(name string) Provider {
 		return NewLever(nil)
 	case "ashby":
 		return NewAshby(nil)
+	case "workday":
+		return NewWorkday(nil)
 	default:
 		return nil
 	}

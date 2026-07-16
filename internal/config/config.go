@@ -13,6 +13,13 @@ type Company struct {
 	Name     string `yaml:"name"`
 	Provider string `yaml:"provider"`
 	Slug     string `yaml:"slug"`
+	// Host and Site are Workday-only: Workday postings live at
+	// https://{slug}.{host}.myworkdayjobs.com/wday/cxs/{slug}/{site}/jobs,
+	// where slug is the tenant, host is the numbered subdomain (e.g. "wd1",
+	// "wd3"), and site is the career-site path segment (e.g.
+	// "WellsFargoJobs"). Both are required when provider is "workday".
+	Host string `yaml:"host,omitempty"`
+	Site string `yaml:"site,omitempty"`
 }
 
 type Filters struct {
@@ -61,7 +68,7 @@ func (c *Config) validate() error {
 	if len(c.Companies) == 0 {
 		return fmt.Errorf("companies: at least one company required")
 	}
-	validProviders := map[string]bool{"greenhouse": true, "lever": true, "ashby": true}
+	validProviders := map[string]bool{"greenhouse": true, "lever": true, "ashby": true, "workday": true}
 	for i, co := range c.Companies {
 		if co.Name == "" {
 			return fmt.Errorf("companies[%d]: name required", i)
@@ -69,8 +76,12 @@ func (c *Config) validate() error {
 		if co.Slug == "" {
 			return fmt.Errorf("companies[%d] (%s): slug required", i, co.Name)
 		}
-		if !validProviders[strings.ToLower(co.Provider)] {
-			return fmt.Errorf("companies[%d] (%s): unsupported provider %q (want greenhouse, lever, or ashby)", i, co.Name, co.Provider)
+		provider := strings.ToLower(co.Provider)
+		if !validProviders[provider] {
+			return fmt.Errorf("companies[%d] (%s): unsupported provider %q (want greenhouse, lever, ashby, or workday)", i, co.Name, co.Provider)
+		}
+		if provider == "workday" && (co.Host == "" || co.Site == "") {
+			return fmt.Errorf("companies[%d] (%s): workday requires host and site", i, co.Name)
 		}
 	}
 	if c.DBPath == "" {
