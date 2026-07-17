@@ -14,6 +14,18 @@ source "$ROOT_DIR/.env"
 
 # Run poll
 cd "$ROOT_DIR"
+
+# Rebuild before polling so cron never runs a stale binary against fixed
+# source (e.g. the workday.go URL fix that shipped but wasn't picked up
+# until the next manual build). go build is a fast no-op when nothing
+# changed; if it fails, keep the last good binary and log the failure
+# instead of blocking the poll.
+BUILD_OUTPUT=$(go build -o bin/jobwatch ./cmd/jobwatch 2>&1)
+if [ $? -ne 0 ]; then
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] BUILD_FAILED, using existing binary" >> "$LOGFILE"
+    echo "$BUILD_OUTPUT" >> "$LOGFILE"
+fi
+
 OUTPUT=$(./bin/jobwatch poll 2>&1)
 EXIT_CODE=$?
 TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
