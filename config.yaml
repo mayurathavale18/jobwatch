@@ -27,9 +27,9 @@ companies:
     slug: wwr
 
 filters:
-  include_keywords: ["backend", "software engineer", "sde", "swe", "platform", "golang", "python", "cloud", "infrastructure", "fullstack", "full stack", "data engineer", "distributed systems", "forward deployed", "fde", "ai engineer", "ai platform", "llm", "machine learning engineer", "ml engineer", "mlops", "rag", "agent", "sre", "site reliability", "systems engineer", "devops", "solutions engineer", "microservices", "reliability engineer"]
+  include_keywords: ["backend", "software engineer", "sde", "swe", "platform", "golang", "python", "cloud", "infrastructure", "fullstack", "full stack", "full-stack", "data engineer", "distributed systems", "forward deployed", "fde", "ai engineer", "ai platform", "llm", "machine learning engineer", "ml engineer", "mlops", "rag", "agent", "sre", "site reliability", "systems engineer", "devops", "solutions engineer", "microservices", "reliability engineer"]
   exclude_keywords: ["staff", "principal", "director", "manager", "intern", "10+ years"]
-  locations_include: ["india", "hyderabad", "bengaluru", "bangalore", "remote"]
+  locations_include: ["india", "hyderabad", "bengaluru", "bangalore", "remote", "worldwide", "anywhere"]
 
 telegram:
   bot_token_env: "JOBWATCH_TG_TOKEN"
