@@ -21,7 +21,12 @@ SERVICE_USER="jobwatch"
 
 echo "==> Installing system packages"
 apt-get update -qq
-apt-get install -y -qq git curl build-essential poppler-utils ca-certificates
+# libgraphite2-3 is a runtime dependency of the tectonic binary installed
+# below (font shaping) -- without it, tectonic fails at startup with
+# "error while loading shared libraries: libgraphite2.so.3: cannot open
+# shared object file", which only surfaces the first time a resume is
+# actually tailored, not during setup itself.
+apt-get install -y -qq git curl build-essential poppler-utils ca-certificates libgraphite2-3
 
 echo "==> Installing Go ${GO_VERSION} (if missing)"
 if ! command -v go >/dev/null || [ "$(go version | awk '{print $3}')" != "go${GO_VERSION}" ]; then
