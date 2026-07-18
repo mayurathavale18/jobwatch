@@ -182,6 +182,83 @@ def keyword_in_text(kw, text):
         pattern = re.escape(kw)
     return bool(re.search(pattern, text))
 
+# Skills Mayur truthfully has per facts.md. A JD keyword landing here but
+# absent from the resume text is a real coverage gap worth closing (see
+# inject_keyword_emphasis); one NOT in this set is a fabrication risk and
+# must never be added to the resume, no matter how well it'd score.
+TRUTHFUL_SKILLS = {
+    "go", "golang", "python", "typescript", "javascript", "java", "sql", "bash",
+    "rest", "rest api", "rest apis", "microservices", "fastapi", "nestjs", "node.js", "nodejs",
+    "gin", "krakend", "api gateway", "api gateways", "temporal", "graphql", "hasura",
+    "sse", "streaming", "webhooks", "event-driven", "event driven architecture",
+    "postgresql", "postgres", "mysql", "redis", "valkey", "dynamodb", "opensearch",
+    "mongodb", "s3", "s3 tables", "spark", "sqs", "sns", "dynamodb streams", "eventbridge",
+    "redshift", "athena",
+    "aws", "terraform", "docker", "github actions", "ci/cd",
+    "ecs", "ec2", "rds", "lambda", "secrets manager", "cloudwatch", "fargate",
+    "langgraph", "langchain", "rag", "llm", "ai", "ml", "machine learning", "multi-agent",
+    "agent", "agents", "agentic", "litellm", "mcp", "vector search", "embedding", "embeddings",
+    "knn", "bm25", "hybrid retrieval",
+    "react", "next.js", "nextjs", "vite", "nx", "react native", "expo", "pwa",
+    "full stack", "fullstack", "frontend", "prompt engineering",
+    "distributed systems", "system design", "concurrency", "multi-tenant", "multitenant",
+    "secure coding", "solid", "resiliency", "observability", "metrics", "logging", "tracing",
+    "monitoring", "alerting", "reliability", "scalability", "performance",
+    "idempotency", "retries",
+    "forward deployed engineer", "fde", "solutions engineer", "solutions architect",
+    "data engineer", "backend engineer", "software engineer", "sre", "site reliability",
+    "security", "networking",
+}
+
+# Display casing for keywords that might get injected into bullet text or
+# the Additional Skills line (see inject_keyword_emphasis) -- KEYWORD_CANDIDATES
+# and TRUTHFUL_SKILLS are stored lowercase for matching, but the resume text
+# itself needs real casing (AWS, not Aws). Anything missing here falls back
+# to .title(), which is fine for plain words but wrong for acronyms.
+CANONICAL_CASE = {
+    "go": "Go", "golang": "Golang", "python": "Python", "typescript": "TypeScript",
+    "javascript": "JavaScript", "java": "Java", "sql": "SQL", "bash": "Bash",
+    "rest": "REST", "rest api": "REST API", "rest apis": "REST APIs", "microservices": "Microservices",
+    "fastapi": "FastAPI", "nestjs": "NestJS", "node.js": "Node.js", "nodejs": "Node.js",
+    "gin": "Gin", "krakend": "KrakenD", "api gateway": "API Gateway", "api gateways": "API Gateways",
+    "temporal": "Temporal", "graphql": "GraphQL", "hasura": "Hasura",
+    "sse": "SSE", "streaming": "Streaming", "webhooks": "Webhooks", "event-driven": "Event-driven",
+    "event driven architecture": "Event-driven Architecture",
+    "postgresql": "PostgreSQL", "postgres": "Postgres", "mysql": "MySQL", "redis": "Redis",
+    "valkey": "Valkey", "dynamodb": "DynamoDB", "opensearch": "OpenSearch", "mongodb": "MongoDB",
+    "s3": "S3", "s3 tables": "S3 Tables", "spark": "Spark", "sqs": "SQS", "sns": "SNS",
+    "dynamodb streams": "DynamoDB Streams", "eventbridge": "EventBridge",
+    "redshift": "Redshift", "athena": "Athena",
+    "aws": "AWS", "terraform": "Terraform", "docker": "Docker", "github actions": "GitHub Actions",
+    "ci/cd": "CI/CD",
+    "ecs": "ECS", "ec2": "EC2", "rds": "RDS", "lambda": "Lambda", "secrets manager": "Secrets Manager",
+    "cloudwatch": "CloudWatch", "fargate": "Fargate",
+    "langgraph": "LangGraph", "langchain": "LangChain", "rag": "RAG", "llm": "LLM", "ai": "AI",
+    "ml": "ML", "machine learning": "Machine Learning", "multi-agent": "Multi-Agent",
+    "agent": "Agent", "agents": "Agents", "agentic": "Agentic", "litellm": "LiteLLM", "mcp": "MCP",
+    "vector search": "Vector Search", "embedding": "Embedding", "embeddings": "Embeddings",
+    "knn": "KNN", "bm25": "BM25", "hybrid retrieval": "Hybrid Retrieval",
+    "react": "React", "next.js": "Next.js", "nextjs": "Next.js", "vite": "Vite", "nx": "NX",
+    "react native": "React Native", "expo": "Expo", "pwa": "PWA",
+    "full stack": "Full Stack", "fullstack": "Fullstack", "frontend": "Frontend",
+    "prompt engineering": "Prompt Engineering",
+    "distributed systems": "Distributed Systems", "system design": "System Design",
+    "concurrency": "Concurrency", "multi-tenant": "Multi-Tenant", "multitenant": "Multitenant",
+    "secure coding": "Secure Coding", "solid": "SOLID", "resiliency": "Resiliency",
+    "observability": "Observability", "metrics": "Metrics", "logging": "Logging", "tracing": "Tracing",
+    "monitoring": "Monitoring", "alerting": "Alerting", "reliability": "Reliability",
+    "scalability": "Scalability", "performance": "Performance",
+    "idempotency": "Idempotency", "retries": "Retries",
+    "forward deployed engineer": "Forward Deployed Engineer", "fde": "FDE",
+    "solutions engineer": "Solutions Engineer", "solutions architect": "Solutions Architect",
+    "data engineer": "Data Engineer", "backend engineer": "Backend Engineer",
+    "software engineer": "Software Engineer", "sre": "SRE", "site reliability": "Site Reliability",
+    "security": "Security", "networking": "Networking",
+}
+
+def canonical_case(kw):
+    return CANONICAL_CASE.get(kw, kw.title())
+
 def score_coverage(keywords, resume_text):
     """Return coverage score and lists of covered/not-covered keywords."""
     covered = []
@@ -190,37 +267,10 @@ def score_coverage(keywords, resume_text):
     for kw in keywords:
         if keyword_in_text(kw, resume_text):
             covered.append(kw)
+        elif kw in TRUTHFUL_SKILLS:
+            not_covered.append(kw)
         else:
-            # Check if it's a truthful skill
-            truthful = False
-            # These are skills Mayur has per facts.md
-            truthful_skills = [
-                "go", "golang", "python", "typescript", "javascript", "java", "sql", "bash",
-                "rest", "rest api", "rest apis", "microservices", "fastapi", "nestjs", "node.js", "nodejs",
-                "gin", "krakend", "api gateway", "api gateways", "temporal", "graphql", "hasura",
-                "sse", "streaming", "webhooks", "event-driven", "event driven architecture",
-                "postgresql", "postgres", "mysql", "redis", "valkey", "dynamodb", "opensearch",
-                "mongodb", "s3", "s3 tables", "spark", "sqs", "sns", "dynamodb streams", "eventbridge",
-                "redshift", "athena",
-                "aws", "terraform", "docker", "github actions", "ci/cd",
-                "ecs", "ec2", "rds", "lambda", "secrets manager", "cloudwatch", "fargate",
-                "langgraph", "langchain", "rag", "llm", "ai", "ml", "machine learning", "multi-agent",
-                "agent", "agents", "agentic", "litellm", "mcp", "vector search", "embedding", "embeddings",
-                "knn", "bm25", "hybrid retrieval",
-                "react", "next.js", "nextjs", "vite", "nx", "react native", "expo", "pwa",
-                "full stack", "fullstack", "frontend", "prompt engineering",
-                "distributed systems", "system design", "concurrency", "multi-tenant", "multitenant",
-                "secure coding", "solid", "resiliency", "observability", "metrics", "logging", "tracing",
-                "monitoring", "alerting", "reliability", "scalability", "performance",
-                "idempotency", "retries",
-                "forward deployed engineer", "fde", "solutions engineer", "solutions architect",
-                "data engineer", "backend engineer", "software engineer", "sre", "site reliability",
-                "security", "networking",
-            ]
-            if kw in truthful_skills:
-                not_covered.append(kw)
-            else:
-                not_truthful.append(kw)
+            not_truthful.append(kw)
     score = len(covered) / len(keywords) if keywords else 1.0
     return round(score, 2), covered, not_covered, not_truthful
 
@@ -259,13 +309,20 @@ def determine_focus(jd_text, title):
 
 def build_skills_section(focus, jd_keywords):
     """Build the Technical Skills section, reordered by relevance."""
-    # Base categories
+    # Base categories. Sub-technologies are flattened into the top-level
+    # comma list rather than nested in parens (e.g. "AWS, ECS, EC2, ..."
+    # not "AWS (ECS, EC2, ...)") -- ATS skill-taggers that split on
+    # top-level commas only were reading the parenthetical form as one long
+    # unmatched string instead of recognizing each technology as its own
+    # keyword. Must match master.tex's Skills section structure (see its
+    # own comment) -- this function overwrites that section wholesale for
+    # every tailored resume, so drift here silently undoes that fix.
     categories = {
         "Languages": "Go, Python, TypeScript, JavaScript, SQL, Bash",
-        "Backend": "REST APIs, Microservices, FastAPI, NestJS, Node.js, API Gateways (KrakenD), Event-driven Architecture (SQS, SNS, DynamoDB Streams), Temporal Workflows",
+        "Backend": "REST APIs, Microservices, FastAPI, NestJS, Node.js, API Gateways, KrakenD, Event-driven Architecture, SQS, SNS, DynamoDB Streams, Temporal Workflows",
         "Databases": "PostgreSQL, MySQL, Redis, DynamoDB, OpenSearch, MongoDB",
-        "Infrastructure": "AWS (ECS, EC2, RDS, SQS, SNS, DynamoDB, Lambda, Secrets Manager, CloudWatch), Terraform, Docker, Kubernetes, GitHub Actions",
-        "AI/LLM": "LangGraph, LangChain, RAG Pipelines, OpenSearch (KNN + BM25), Multi-Agent Orchestration",
+        "Infrastructure": "AWS, ECS, EC2, RDS, SQS, SNS, DynamoDB, Lambda, Secrets Manager, CloudWatch, Terraform, Docker, Kubernetes, GitHub Actions",
+        "AI/LLM": "LangGraph, LangChain, RAG Pipelines, OpenSearch, KNN, BM25, Multi-Agent Orchestration",
         "Frontend": "React, Next.js 14, TypeScript, GraphQL, tRPC",
         "Concepts": "System Design, Distributed Systems, Concurrency, Multi-Tenant Architecture, Secure Coding, SOLID, Resiliency Patterns",
     }
@@ -278,7 +335,7 @@ def build_skills_section(focus, jd_keywords):
     if "spark" in jd_text_lower:
         categories["Databases"] = "PostgreSQL, MySQL, Redis, DynamoDB, OpenSearch, MongoDB, Spark, S3 Tables"
     if "observability" in jd_text_lower or "monitoring" in jd_text_lower or "metrics" in jd_text_lower or "logging" in jd_text_lower:
-        categories["Infrastructure"] = "AWS (ECS, EC2, RDS, SQS, SNS, DynamoDB, Lambda, Secrets Manager, CloudWatch), Terraform, Docker, Kubernetes, GitHub Actions, CloudWatch Metrics, Structured Logging"
+        categories["Infrastructure"] = "AWS, ECS, EC2, RDS, SQS, SNS, DynamoDB, Lambda, Secrets Manager, CloudWatch, Terraform, Docker, Kubernetes, GitHub Actions, CloudWatch Metrics, Structured Logging"
 
     # Reorder categories based on focus
     order = []
@@ -370,6 +427,44 @@ def build_experience_bullets(focus, jd_keywords, tight=False):
 
     return [b["text"] for b in scored]
 
+MAX_INJECTED_KEYWORDS = 3
+
+def inject_keyword_emphasis(bullets, skills_section, jd_keywords):
+    """Close truthful JD-keyword coverage gaps without fabricating anything.
+
+    A JD keyword can be truthful (per TRUTHFUL_SKILLS) but still missing
+    from the resume text simply because none of the fixed bullets happen to
+    mention it -- e.g. a JD asking for "CI/CD" explicitly when the bullet
+    text says "GitHub Actions" but never the literal term "CI/CD". That's a
+    real, closeable coverage gap, not a fabrication risk (score_coverage
+    already keeps the "not_truthful" case, i.e. real gaps, separate and
+    those are never touched here).
+
+    Up to MAX_INJECTED_KEYWORDS such gaps get folded into the single
+    highest-relevance bullet (bullets[0] -- build_experience_bullets already
+    returns bullets sorted by focus/keyword match) as a short bolded clause.
+    Anything past that cap goes on a plain "Additional Relevant Skills" line
+    instead of bloating one bullet indefinitely.
+    """
+    draft_text = skills_section + "\n" + "\n".join(bullets)
+    _, _, not_covered, _ = score_coverage(jd_keywords, draft_text)
+    if not not_covered:
+        return bullets, None
+
+    inject_now, remaining = not_covered[:MAX_INJECTED_KEYWORDS], not_covered[MAX_INJECTED_KEYWORDS:]
+
+    if inject_now and bullets:
+        bolded = ", ".join(f"\\textbf{{{canonical_case(kw)}}}" for kw in inject_now)
+        bullets = list(bullets)
+        bullets[0] = bullets[0].rstrip() + f" Also applies {bolded} in this work."
+
+    extra_skills_line = None
+    if remaining:
+        plain = ", ".join(canonical_case(kw) for kw in remaining)
+        extra_skills_line = f"\\techSkill{{Additional Relevant Skills}}{{{plain}}}"
+
+    return bullets, extra_skills_line
+
 def build_projects_section(focus, jd_keywords):
     """Build the Projects & Writing section."""
     projects = [
@@ -404,10 +499,10 @@ def generate_resume(job, jd_data, tight=False):
         # Rebuild
         categories = {
             "Languages": "Go, Python, TypeScript, JavaScript, SQL, Bash",
-            "Backend": "REST APIs, Microservices, FastAPI, NestJS, Node.js, API Gateways (KrakenD), Event-driven Architecture (SQS, SNS, DynamoDB Streams), Temporal Workflows",
+            "Backend": "REST APIs, Microservices, FastAPI, NestJS, Node.js, API Gateways, KrakenD, Event-driven Architecture, SQS, SNS, DynamoDB Streams, Temporal Workflows",
             "Databases": "PostgreSQL, MySQL, Redis, DynamoDB, OpenSearch, MongoDB",
-            "Infrastructure": "AWS (ECS, EC2, RDS, SQS, SNS, DynamoDB, Lambda, Secrets Manager, CloudWatch), Terraform, Docker, Kubernetes, GitHub Actions",
-            "AI/LLM": "LangGraph, LangChain, RAG Pipelines, OpenSearch (KNN + BM25), Multi-Agent Orchestration",
+            "Infrastructure": "AWS, ECS, EC2, RDS, SQS, SNS, DynamoDB, Lambda, Secrets Manager, CloudWatch, Terraform, Docker, Kubernetes, GitHub Actions",
+            "AI/LLM": "LangGraph, LangChain, RAG Pipelines, OpenSearch, KNN, BM25, Multi-Agent Orchestration",
             "Frontend": "React, Next.js 14, TypeScript, GraphQL, tRPC",
             "Concepts": "System Design, Distributed Systems, Concurrency, Multi-Tenant Architecture, Secure Coding, SOLID, Resiliency Patterns",
         }
@@ -417,12 +512,21 @@ def generate_resume(job, jd_data, tight=False):
         if "spark" in jd_text_lower:
             categories["Databases"] = "PostgreSQL, MySQL, Redis, DynamoDB, OpenSearch, MongoDB, Spark, S3 Tables"
         if "observability" in jd_text_lower or "monitoring" in jd_text_lower:
-            categories["Infrastructure"] = "AWS (ECS, EC2, RDS, SQS, SNS, DynamoDB, Lambda, Secrets Manager, CloudWatch), Terraform, Docker, Kubernetes, GitHub Actions, CloudWatch Metrics, Structured Logging"
+            categories["Infrastructure"] = "AWS, ECS, EC2, RDS, SQS, SNS, DynamoDB, Lambda, Secrets Manager, CloudWatch, Terraform, Docker, Kubernetes, GitHub Actions, CloudWatch Metrics, Structured Logging"
         skills_lines = [f"\\techSkill{{{cat}}}{{{categories[cat]}}}" for cat in keep]
         skills_section = "\n".join(skills_lines)
 
     bullets = build_experience_bullets(focus, jd_keywords, tight=tight)
     projects = build_projects_section(focus, jd_keywords)
+
+    # Close truthful coverage gaps: inject up to MAX_INJECTED_KEYWORDS
+    # missing-but-truthful JD keywords into the top bullet, and put any
+    # overflow on an "Additional Relevant Skills" line -- skipped in tight
+    # mode, since one page takes priority over closing the last few points
+    # of coverage (see inject_keyword_emphasis's docstring).
+    bullets, extra_skills_line = inject_keyword_emphasis(bullets, skills_section, jd_keywords)
+    if extra_skills_line and not tight:
+        skills_section = skills_section + "\n" + extra_skills_line
 
     # Replace skills section. Lookahead anchors on \section{Experience} only
     # (not the preceding \vspace, whose glue value is a master.tex layout

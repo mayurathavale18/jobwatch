@@ -7,10 +7,14 @@
 \usepackage{fancyhdr}
 \usepackage{tabularx}
 \usepackage[T1]{fontenc}
-\usepackage{fontawesome}
 \usepackage{ifxetex}
-% Inline external-link icon — signals clickability in PDF viewers and on mobile
-\newcommand{\extlink}[2]{\href{#1}{#2~{\small\faExternalLink}}}
+% Plain hyperlinked text, no icon glyph -- FontAwesome's custom Type1 glyphs
+% (formerly used here and in the header) sit in Unicode's Private Use Area
+% and aren't covered by glyphtounicode's ToUnicode mapping below, so ATS
+% text extraction either drops them or emits garbage, and can scramble the
+% surrounding reading order in parsers that don't do layout reconstruction
+% (verified via pdftotext -- see the header comment for the concrete case).
+\newcommand{\extlink}[2]{\href{#1}{#2}}
 \newcommand{\techSkill}[2]{\par\noindent\small{\textbf{#1:} #2}\vspace{4pt}}
 \ifxetex
   % XeTeX / LuaTeX handle glyph mapping natively
@@ -51,22 +55,31 @@
 {\Huge \scshape Mayur Athavale} \\
 \vspace{6pt}
 \normalsize
-Hyderabad, Telangana, India \hspace{6pt} \textbullet\ +91-7972833243 \hspace{6pt} \textbullet\ \href{mailto:mayat.dev1569@gmail.com}{mayat.dev1569@gmail.com} \\
+% Space, not hyphen, between country code and number -- ATS phone-field
+% autofill (splitting into separate "country code" / "number" form fields)
+% parses "+91 7972833243" reliably; "+91-7972833243" was getting grabbed as
+% one undifferentiated string instead of splitting on the space.
+Hyderabad, Telangana, India \hspace{6pt} \textbullet\ +91 7972833243 \hspace{6pt} \textbullet\ \href{mailto:mayat.dev1569@gmail.com}{mayat.dev1569@gmail.com} \\
 \vspace{8pt}
-{\large\faLinkedin}\ \href{https://linkedin.com/in/mayurathavale1729}{linkedin} \hspace{14pt}
-{\large\faGithub}\ \href{https://github.com/mayurathavale18}{github} \hspace{14pt}
-{\large\faMedium}\ \href{https://mayatdev1569.medium.com/}{medium} \hspace{14pt}
-{\large\faGlobe}\ \href{https://mayurathavale.com/}{mayurathavale.com} \hspace{14pt}
-{\large\faTerminal}\ \href{ssh://portfolio.mayurathavale.com}{\texttt{ssh portfolio.mayurathavale.com}}
+% Plain text labels, no icon glyphs -- see \extlink's comment above for why.
+\href{https://linkedin.com/in/mayurathavale1729}{LinkedIn} \hspace{4pt}\textbullet\hspace{4pt}
+\href{https://github.com/mayurathavale18}{GitHub} \hspace{4pt}\textbullet\hspace{4pt}
+\href{https://mayatdev1569.medium.com/}{Medium} \hspace{4pt}\textbullet\hspace{4pt}
+\href{https://mayurathavale.com/}{mayurathavale.com} \hspace{4pt}\textbullet\hspace{4pt}
+\href{ssh://portfolio.mayurathavale.com}{\texttt{ssh portfolio.mayurathavale.com}}
 \end{center}
 
 % ---------- SKILLS ----------
 \section{Technical Skills}
 \techSkill{Languages}{Go, Python, TypeScript, JavaScript, SQL, Bash}
-\techSkill{Backend}{REST APIs, Microservices, FastAPI, NestJS, Node.js, API Gateways (KrakenD), Event-driven Architecture (SQS, SNS, DynamoDB Streams), Temporal Workflows}
+% Sub-technologies flattened into the top-level comma list rather than
+% nested in parens -- ATS skill-taggers that split on top-level commas only
+% were reading "AWS (ECS, EC2, RDS, ...)" as one long unmatched string
+% instead of recognizing ECS/EC2/RDS/Lambda etc. as individual keywords.
+\techSkill{Backend}{REST APIs, Microservices, FastAPI, NestJS, Node.js, API Gateways, KrakenD, Event-driven Architecture, SQS, SNS, DynamoDB Streams, Temporal Workflows}
 \techSkill{Databases}{PostgreSQL, MySQL, Redis, DynamoDB, OpenSearch, MongoDB}
-\techSkill{Infrastructure}{AWS (ECS, EC2, RDS, SQS, SNS, DynamoDB, Lambda, Secrets Manager, CloudWatch), Terraform, Docker, Kubernetes, GitHub Actions}
-\techSkill{AI/LLM}{LangGraph, LangChain, RAG Pipelines, OpenSearch (KNN + BM25), Multi-Agent Orchestration}
+\techSkill{Infrastructure}{AWS, ECS, EC2, RDS, SQS, SNS, DynamoDB, Lambda, Secrets Manager, CloudWatch, Terraform, Docker, Kubernetes, GitHub Actions}
+\techSkill{AI/LLM}{LangGraph, LangChain, RAG Pipelines, OpenSearch, KNN, BM25, Multi-Agent Orchestration}
 \techSkill{Frontend}{React, Next.js 14, TypeScript, GraphQL, tRPC}
 \techSkill{Concepts}{System Design, Distributed Systems, Concurrency, Multi-Tenant Architecture, Secure Coding, SOLID, Resiliency Patterns}
 
@@ -124,8 +137,12 @@ Hyderabad, Telangana, India \hspace{6pt} \textbullet\ +91-7972833243 \hspace{6pt
 \vspace{4pt plus 1fill}
 \section{Education}
 \begin{itemize}[leftmargin=0pt]
+% Comma added -- "College of Engineering, Pune" is the institute's actual
+% official name; without it, some ATS institution-lookup matching was
+% truncating to the generic "College of Engineering" (a name shared by many
+% unrelated institutions) and dropping "Pune" entirely.
 \resumeSubheading
-{College of Engineering Pune (COEP)}{2020 -- 2024}
+{College of Engineering, Pune (COEP)}{2020 -- 2024}
 {B.Tech}{}
 \end{itemize}
 

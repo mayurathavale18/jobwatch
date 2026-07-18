@@ -4,7 +4,7 @@
 
 ## Identity
 - SDE-I (full-time) at Zotok.ai, Jan 2025 – Present. Location: Hyderabad, Telangana, India.
-- B.Tech, College of Engineering Pune (COEP), 2020–2024.
+- B.Tech, College of Engineering, Pune (COEP), 2020–2024.
 - Contacts/links: as in master.tex (Hyderabad, LinkedIn, GitHub, Medium, mayurathavale.com, ssh portfolio).
 
 ## Ownership summary
