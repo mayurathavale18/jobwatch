@@ -6,6 +6,9 @@ sends a Telegram notification per new match, and serves a local dashboard
 to track application status.
 
 Supported ATS providers: **Greenhouse**, **Lever**, **Ashby**, **Workday**.
+Also pulls from search aggregators **RemoteOK** and **We Work Remotely**,
+plus manual URL submission via Telegram for sites that block automated
+access (Naukri, YC, Wellfound).
 
 ## Setup
 
@@ -132,6 +135,34 @@ means it's correct. Large employers can have thousands of open postings —
 jobwatch fetches up to 300 per company per poll cycle (most-recent-first),
 not the entire board; see the Design notes below.
 
+### Search aggregators (RemoteOK, We Work Remotely)
+
+Unlike the ATS providers above, `remoteok` and `wwr` aren't scoped to one
+company — each poll returns jobs across many different real companies, and
+every returned job carries its own company name, not the config entry's.
+`slug` is required by the config schema but unused; any label works:
+
+```yaml
+- name: "RemoteOK"
+  provider: remoteok
+  slug: remoteok
+- name: "We Work Remotely"
+  provider: wwr
+  slug: wwr
+```
+
+Both are public, unauthenticated feeds (RemoteOK's JSON API, WWR's RSS) —
+no slug lookup needed. Because the same real posting can be discovered
+twice (once via a company's own board, once via an aggregator indexing it),
+jobwatch also fuzzy-dedupes on normalized company+title+location across
+*all* providers within a 30-day window before inserting — see `Design
+notes` below.
+
+Naukri, Work at a Startup (YC), and Wellfound were considered too but all
+three actively block automated/non-browser access (reCAPTCHA, bot
+challenges) — not something jobwatch scrapes around. Use the manual-submit
+flow instead (see [Manually adding a job](#manually-adding-a-job-naukri-yc-wellfound-or-anywhere-else) above).
+
 ## Cron example
 
 See `deploy/crontab.example` for a ready-to-edit crontab covering polling,
@@ -228,6 +259,16 @@ replies explaining why — either way, nothing in the database changes.
 Only replies from the chat configured in `JOBWATCH_TG_CHAT` are processed;
 updates from any other chat are logged and ignored.
 
+### Manually adding a job (Naukri, YC, Wellfound, or anywhere else)
+
+Some job boards (Naukri, Work at a Startup, Wellfound, ...) actively block
+automated access, so jobwatch can't poll them as a provider. Instead, send
+the bot a plain message containing **just the job's URL** (not a reply) and
+it fetches the page's title and adds it as a new job — same status,
+`note:`, and `fix` handling as any polled job, and it rides the existing
+tailor-resume cron. If the title can't be auto-detected, reply `note: <real
+title>` to fix it up. Resending the same URL is a no-op.
+
 ## Commands
 
 | Command | Behavior |
@@ -247,6 +288,11 @@ All commands accept `-config path/to/config.yaml` (default `config.yaml`).
   (`Fetch(ctx, company) ([]Job, error)`) in one new file.
 - Dedupe key is `(provider, company_slug, external_id)`, enforced both by a
   SQLite `UNIQUE` constraint and an explicit existence check before insert.
+  On top of that, a fuzzy check (normalized company+title+location, any
+  provider, within 30 days) catches the same real posting surfacing via two
+  different sources — e.g. a company's own Greenhouse board and a search
+  aggregator indexing it — which the exact key can't, since the two
+  providers assign unrelated external IDs to the same job.
 - Polling fans out to at most 5 companies concurrently (semaphore-bounded),
   with a 60s timeout per company (sized for Workday's pagination — up to 15
   sequential requests per company — not just a single HTTP call). A failure
@@ -275,8 +321,10 @@ make build        # builds ./bin/jobwatch
 ```
 
 Test fixtures for provider parsing live in
-`internal/providers/testdata/{greenhouse,lever,ashby}/` — the Greenhouse
-and Ashby fixtures are trimmed real API responses; the Lever fixture is
-built from Lever's documented public schema (no company with an open,
-non-empty public Lever board was found while building this, dozens of
-candidate slugs were probed and returned either `404` or an empty `[]`).
+`internal/providers/testdata/{greenhouse,lever,ashby,remoteok,wwr}/` — the
+Greenhouse and Ashby fixtures are trimmed real API responses; the Lever
+fixture is built from Lever's documented public schema (no company with an
+open, non-empty public Lever board was found while building this, dozens
+of candidate slugs were probed and returned either `404` or an empty
+`[]`). RemoteOK and WWR fixtures are hand-built minimal samples matching
+each API's verified real response shape.

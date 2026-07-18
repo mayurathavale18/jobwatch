@@ -5,14 +5,21 @@ package tgsync
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
+	"html"
+	"io"
 	"log/slog"
+	"net/http"
+	"net/url"
 	"os/exec"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
 	"jobwatch/internal/notify"
+	"jobwatch/internal/providers"
 	"jobwatch/internal/store"
 )
 
@@ -35,6 +42,55 @@ type telegramClient interface {
 	Reply(ctx context.Context, replyToMessageID int64, text string) error
 }
 
+// pageFetcher fetches a job posting page's <title> for manually-submitted
+// URLs (e.g. Naukri/YC/Wellfound postings jobwatch can't discover on its
+// own -- see manual-submit in processUpdate). Interfaced so tests can
+// substitute a fake instead of making real HTTP requests.
+type pageFetcher interface {
+	FetchTitle(ctx context.Context, rawURL string) (string, error)
+}
+
+const maxPageFetchBytes = 200 * 1024
+
+var titleTagRe = regexp.MustCompile(`(?is)<title[^>]*>(.*?)</title>`)
+
+// httpPageFetcher is the real pageFetcher, used outside tests.
+type httpPageFetcher struct{ Client *http.Client }
+
+func (h httpPageFetcher) FetchTitle(ctx context.Context, rawURL string) (string, error) {
+	client := h.Client
+	if client == nil {
+		client = http.DefaultClient
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; jobwatch/1.0; personal job tracker)")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("unexpected status %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxPageFetchBytes))
+	if err != nil {
+		return "", err
+	}
+
+	m := titleTagRe.FindSubmatch(body)
+	if m == nil {
+		return "", nil
+	}
+	return strings.TrimSpace(html.UnescapeString(string(m[1]))), nil
+}
+
 // Syncer drains Telegram updates once and applies any status/notes changes
 // found in replies to jobwatch notifications.
 type Syncer struct {
@@ -53,10 +109,14 @@ type Syncer struct {
 	// updates means whichever polls first silently consumes the reply
 	// before the other ever sees it.
 	FixScript string
+
+	// Pages fetches manually-submitted job URLs' titles. Defaults to a real
+	// HTTP fetcher; overridable for tests.
+	Pages pageFetcher
 }
 
 func New(st *store.Store, tg *notify.Telegram, chatID int64, fixScript string) *Syncer {
-	return &Syncer{Store: st, TG: tg, ChatID: chatID, FixScript: fixScript}
+	return &Syncer{Store: st, TG: tg, ChatID: chatID, FixScript: fixScript, Pages: httpPageFetcher{}}
 }
 
 // Result summarizes one sync run.
@@ -138,6 +198,9 @@ func (s *Syncer) processUpdate(ctx context.Context, upd notify.Update) (bool, er
 	}
 
 	if msg.ReplyToMessage == nil {
+		if rawURL, ok := manualJobURL(msg.Text); ok {
+			return false, s.addManualJob(ctx, msg, rawURL)
+		}
 		return false, nil
 	}
 
@@ -250,6 +313,103 @@ func (s *Syncer) runFix(ctx context.Context, jobID int64, replyToMessageID int64
 		return s.TG.Reply(ctx, replyToMessageID, fmt.Sprintf("Fix failed for #J%d: %s", jobID, lastLine(string(output))))
 	}
 	return nil
+}
+
+// manualJobURL reports whether text is a message consisting of nothing but
+// a job posting URL, for the manual-submit flow: forwarding a bare URL
+// (not a reply to an existing notification) adds it as a new job. Sources
+// jobwatch can't poll directly (Naukri, YC, Wellfound -- all actively
+// block automated access) go through this path instead of a provider.
+func manualJobURL(text string) (string, bool) {
+	text = strings.TrimSpace(text)
+	if !strings.HasPrefix(text, "http://") && !strings.HasPrefix(text, "https://") {
+		return "", false
+	}
+	if strings.ContainsAny(text, " \t\n") {
+		return "", false
+	}
+	u, err := url.Parse(text)
+	if err != nil || u.Host == "" {
+		return "", false
+	}
+	return text, true
+}
+
+// addManualJob fetches rawURL's page title, inserts it as a new manual job
+// (status "new", so it rides the existing tailor-resume cron the same as
+// any polled job), and confirms with the #J{id} tag reply-based status
+// control depends on. Re-submitting the same URL is a no-op (dedupe key
+// includes the URL itself as external_id).
+func (s *Syncer) addManualJob(ctx context.Context, msg *notify.Message, rawURL string) error {
+	company := companyFromURL(rawURL)
+	slug := manualSlug(rawURL)
+
+	tx, err := s.Store.BeginTx(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback() //nolint:errcheck // no-op if already committed
+
+	exists, err := s.Store.ExistsTx(ctx, tx, "manual", slug, rawURL)
+	if err != nil {
+		return err
+	}
+	if exists {
+		return s.TG.Reply(ctx, msg.MessageID, "Already added that one.")
+	}
+
+	title, err := s.Pages.FetchTitle(ctx, rawURL)
+	if err != nil {
+		slog.Warn("tg-sync: fetching title for manual job failed", "url", rawURL, "error", err)
+	}
+	if title == "" {
+		title = "(title unknown — reply \"note: <real title>\" to fix)"
+	}
+
+	job := providers.Job{
+		Provider:    "manual",
+		CompanySlug: slug,
+		CompanyName: company,
+		ExternalID:  rawURL,
+		Title:       title,
+		URL:         rawURL,
+		FirstSeenAt: time.Now().UTC(),
+		Raw:         json.RawMessage(`{}`),
+	}
+
+	id, err := s.Store.InsertJob(ctx, tx, job, store.StatusNew)
+	if err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+
+	return s.TG.Reply(ctx, msg.MessageID, fmt.Sprintf("✓ Added — %s — %s\n#J%d", company, title, id))
+}
+
+var nonAlnum = regexp.MustCompile(`[^a-z0-9]+`)
+
+// companyFromURL guesses a display company name from a job URL's host
+// (e.g. "www.naukri.com" -> "Naukri"). It's a placeholder, not a real
+// company lookup -- correct it via a "note:" reply if it's wrong.
+func companyFromURL(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return "Unknown"
+	}
+	host := strings.TrimPrefix(u.Hostname(), "www.")
+	root := strings.SplitN(host, ".", 2)[0]
+	if root == "" {
+		return "Unknown"
+	}
+	return strings.ToUpper(root[:1]) + root[1:]
+}
+
+// manualSlug derives a stable company_slug from a job URL's host, for the
+// (provider, company_slug, external_id) dedupe key.
+func manualSlug(rawURL string) string {
+	return nonAlnum.ReplaceAllString(strings.ToLower(companyFromURL(rawURL)), "-")
 }
 
 func lastLine(s string) string {

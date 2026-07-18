@@ -1,0 +1,57 @@
+[
+  {
+    "last_updated": 1784370603,
+    "legal": "API Terms of Service: Please link back to RemoteOK."
+  },
+  {
+    "slug": "acme-backend-engineer-1234",
+    "id": "1234",
+    "epoch": 1784311668,
+    "date": "2026-07-17T18:07:48+00:00",
+    "company": "Acme Corp",
+    "company_logo": "",
+    "position": "Backend Engineer",
+    "tags": ["backend", "golang"],
+    "description": "Build things.",
+    "location": "Worldwide",
+    "apply_url": "https://remoteok.com/remote-jobs/apply/1234",
+    "salary_min": 0,
+    "salary_max": 0,
+    "logo": "",
+    "url": "https://remoteok.com/remote-jobs/acme-backend-engineer-1234"
+  },
+  {
+    "slug": "widgetco-designer-5678",
+    "id": "5678",
+    "epoch": 1784311000,
+    "date": "2026-07-17T17:00:00+00:00",
+    "company": "WidgetCo",
+    "company_logo": "",
+    "position": "Product Designer",
+    "tags": ["design"],
+    "description": "Design things.",
+    "location": "Remote (US)",
+    "apply_url": "",
+    "salary_min": 0,
+    "salary_max": 0,
+    "logo": "",
+    "url": "https://remoteok.com/remote-jobs/widgetco-designer-5678"
+  },
+  {
+    "slug": "thirdco-sre-9999",
+    "id": "9999",
+    "epoch": 1784310000,
+    "date": "2026-07-17T16:00:00+00:00",
+    "company": "ThirdCo",
+    "company_logo": "",
+    "position": "SRE",
+    "tags": ["sre"],
+    "description": "Keep things up.",
+    "location": "Worldwide",
+    "apply_url": "https://remoteok.com/remote-jobs/apply/9999",
+    "salary_min": 0,
+    "salary_max": 0,
+    "logo": "",
+    "url": ""
+  }
+]

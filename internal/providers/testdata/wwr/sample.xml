@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>We Work Remotely: Remote jobs</title>
+    <link>https://weworkremotely.com/categories/remote-programming-jobs.rss</link>
+    <description>Remote jobs</description>
+    <item>
+      <title>Acme Corp: Backend Engineer</title>
+      <link>https://weworkremotely.com/remote-jobs/acme-corp-backend-engineer</link>
+      <region>Anywhere in the World</region>
+      <pubDate>Tue, 30 Jun 2026 20:32:23 +0000</pubDate>
+    </item>
+    <item>
+      <title>WidgetCo: Senior Product Designer (d/w/m*)</title>
+      <link>https://weworkremotely.com/remote-jobs/widgetco-senior-product-designer</link>
+      <region>US Only</region>
+      <pubDate>Tue, 30 Jun 2026 19:00:00 +0000</pubDate>
+    </item>
+  </channel>
+</rss>

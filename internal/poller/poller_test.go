@@ -175,6 +175,56 @@ func TestRunBackfillSkipsNotifications(t *testing.T) {
 	}
 }
 
+func TestRunFuzzyDedupSuppressesSamePostingFromDifferentProvider(t *testing.T) {
+	// Same real posting, discovered via two different providers with
+	// unrelated external IDs -- exact (provider, company_slug, external_id)
+	// dedup can't catch this, but ExistsFuzzyTx should.
+	fp := &fakeProvider{
+		jobs: map[string][]providers.Job{
+			"stripe": {{
+				Provider:    "greenhouse",
+				CompanySlug: "stripe",
+				CompanyName: "Acme",
+				ExternalID:  "1",
+				Title:       "Backend Engineer",
+				Location:    "Remote",
+				URL:         "https://boards.greenhouse.io/acme/1",
+				FirstSeenAt: time.Now().UTC(),
+				Raw:         []byte(`{}`),
+			}},
+			"razorpay": {{
+				Provider:    "lever",
+				CompanySlug: "acme-via-aggregator",
+				CompanyName: "Acme",
+				ExternalID:  "unrelated-id-2",
+				Title:       "Backend Engineer",
+				Location:    "Remote",
+				URL:         "https://remoteok.com/remote-jobs/acme-2",
+				FirstSeenAt: time.Now().UTC(),
+				Raw:         []byte(`{}`),
+			}},
+		},
+	}
+	notifier := &fakeNotifier{}
+	p, st := newTestPoller(t, fp, notifier)
+
+	result, err := p.Run(context.Background(), false)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if result.NewJobs != 1 {
+		t.Errorf("NewJobs = %d, want 1 (second is a fuzzy-dedup match of the first)", result.NewJobs)
+	}
+
+	rows, err := st.ListJobs(context.Background(), store.JobFilter{})
+	if err != nil {
+		t.Fatalf("ListJobs: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 job stored, got %d", len(rows))
+	}
+}
+
 func TestRunContinuesAfterCompanyFailure(t *testing.T) {
 	fp := &fakeProvider{
 		jobs: map[string][]providers.Job{

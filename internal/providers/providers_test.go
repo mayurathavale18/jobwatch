@@ -149,6 +149,99 @@ func TestParseWorkday(t *testing.T) {
 	}
 }
 
+func TestParseRemoteOK(t *testing.T) {
+	data := readFixture(t, "testdata/remoteok/sample.json")
+
+	jobs, err := parseRemoteOKJSON(data)
+	if err != nil {
+		t.Fatalf("parseRemoteOKJSON: %v", err)
+	}
+	if len(jobs) != 3 {
+		t.Fatalf("expected 3 jobs (legal blurb entry skipped), got %d", len(jobs))
+	}
+
+	j := jobs[0]
+	if j.Provider != "remoteok" {
+		t.Errorf("Provider = %q, want remoteok", j.Provider)
+	}
+	if j.CompanySlug != "acme-corp" || j.CompanyName != "Acme Corp" {
+		t.Errorf("company fields wrong: slug=%q name=%q", j.CompanySlug, j.CompanyName)
+	}
+	if j.ExternalID != "1234" {
+		t.Errorf("ExternalID = %q, want 1234", j.ExternalID)
+	}
+	if j.Title != "Backend Engineer" {
+		t.Errorf("Title = %q", j.Title)
+	}
+	if j.URL != "https://remoteok.com/remote-jobs/acme-backend-engineer-1234" {
+		t.Errorf("URL = %q", j.URL)
+	}
+	if j.PostedAt == nil {
+		t.Fatal("PostedAt nil, want parsed timestamp")
+	}
+
+	j2 := jobs[1]
+	if j2.URL != "https://remoteok.com/remote-jobs/widgetco-designer-5678" {
+		t.Errorf("second entry URL = %q", j2.URL)
+	}
+
+	// Third entry has no url, only apply_url -- falls back to it.
+	j3 := jobs[2]
+	if j3.URL != "https://remoteok.com/remote-jobs/apply/9999" {
+		t.Errorf("third entry URL = %q, want apply_url fallback", j3.URL)
+	}
+}
+
+func TestParseWeWorkRemotely(t *testing.T) {
+	data := readFixture(t, "testdata/wwr/sample.xml")
+
+	jobs, err := parseWWRXML(data)
+	if err != nil {
+		t.Fatalf("parseWWRXML: %v", err)
+	}
+	if len(jobs) != 2 {
+		t.Fatalf("expected 2 jobs, got %d", len(jobs))
+	}
+
+	j := jobs[0]
+	if j.Provider != "wwr" {
+		t.Errorf("Provider = %q, want wwr", j.Provider)
+	}
+	if j.CompanySlug != "acme-corp" || j.CompanyName != "Acme Corp" {
+		t.Errorf("company fields wrong: slug=%q name=%q", j.CompanySlug, j.CompanyName)
+	}
+	if j.Title != "Backend Engineer" {
+		t.Errorf("Title = %q, want %q (split off company prefix)", j.Title, "Backend Engineer")
+	}
+	if j.ExternalID != "acme-corp-backend-engineer" {
+		t.Errorf("ExternalID = %q, want URL's last path segment", j.ExternalID)
+	}
+	if j.Location != "Anywhere in the World" {
+		t.Errorf("Location = %q", j.Location)
+	}
+	if j.PostedAt == nil {
+		t.Fatal("PostedAt nil, want parsed timestamp")
+	}
+
+	j2 := jobs[1]
+	if j2.CompanyName != "WidgetCo" || j2.Title != "Senior Product Designer (d/w/m*)" {
+		t.Errorf("second job wrong: company=%q title=%q", j2.CompanyName, j2.Title)
+	}
+}
+
+func TestSlugify(t *testing.T) {
+	cases := map[string]string{
+		"Acme Corp":     "acme-corp",
+		"  WidgetCo  ":  "widgetco",
+		"A/B & C, Inc.": "a-b-c-inc",
+	}
+	for in, want := range cases {
+		if got := slugify(in); got != want {
+			t.Errorf("slugify(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestParseAshbySkipsUnlisted(t *testing.T) {
 	data := []byte(`{"jobs":[
 		{"id":"1","title":"Listed Job","location":"Remote","jobUrl":"https://x/1","isListed":true},

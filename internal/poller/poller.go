@@ -19,6 +19,12 @@ const (
 	// (~1s each) per company, well past what a single Greenhouse/Lever/Ashby
 	// request needs -- sized for that instead of the single-request case.
 	requestTimeout = 60 * time.Second
+	// fuzzyDedupWindow bounds how far back ExistsFuzzyTx looks for a
+	// same-posting match from a different provider. 30 days comfortably
+	// covers the gap between a job going live on a company's own board and
+	// a search aggregator indexing it, without matching against a job
+	// reposted under the same title months later.
+	fuzzyDedupWindow = 30 * 24 * time.Hour
 )
 
 // Notifier is the subset of *notify.Telegram the poller needs, so tests can
@@ -151,6 +157,15 @@ func (p *Poller) pollCompany(ctx context.Context, company config.Company, backfi
 			continue
 		}
 		if exists {
+			continue
+		}
+
+		fuzzyExists, err := p.Store.ExistsFuzzyTx(ctx, tx, job.CompanyName, job.Title, job.Location, time.Now().Add(-fuzzyDedupWindow))
+		if err != nil {
+			slog.Error("checking fuzzy dedupe", "company", job.CompanyName, "title", job.Title, "error", err)
+			continue
+		}
+		if fuzzyExists {
 			continue
 		}
 

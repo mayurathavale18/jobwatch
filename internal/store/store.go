@@ -147,6 +147,34 @@ func existsQuerier(ctx context.Context, q querier, provider, companySlug, extern
 	return true, nil
 }
 
+// ExistsFuzzyTx reports whether a job with the same normalized
+// company/title/location already exists (from any provider) with
+// first_seen_at at or after since. This catches the same real posting
+// being discovered twice -- once via a company's own ATS board, once via
+// a search aggregator (RemoteOK, We Work Remotely) indexing it -- which
+// the exact (provider, company_slug, external_id) key in Exists/ExistsTx
+// can't, since the two providers assign unrelated external IDs to the same
+// job.
+func (s *Store) ExistsFuzzyTx(ctx context.Context, tx *sql.Tx, companyName, title, location string, since time.Time) (bool, error) {
+	var one int
+	err := tx.QueryRowContext(ctx, `
+		SELECT 1 FROM jobs
+		WHERE LOWER(TRIM(company_name)) = LOWER(TRIM(?))
+		  AND LOWER(TRIM(title)) = LOWER(TRIM(?))
+		  AND LOWER(TRIM(location)) = LOWER(TRIM(?))
+		  AND first_seen_at >= ?
+		LIMIT 1`,
+		companyName, title, location, since.UTC().Format(time.RFC3339),
+	).Scan(&one)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 // InsertJob inserts a new job row with the given status. It must only be
 // called for jobs that Exists reported false for (dedupe is enforced by the
 // caller, not by relying on the UNIQUE constraint, so we can distinguish

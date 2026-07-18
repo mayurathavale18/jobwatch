@@ -3,6 +3,7 @@ package tgsync
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -462,5 +463,165 @@ func TestRunFixCaseInsensitive(t *testing.T) {
 	}
 	if len(fake.replies) != 1 || fake.replies[0].Text != "Resume-fix isn't configured on this install." {
 		t.Errorf("expected \"FIX\" to be treated case-insensitively, got %+v", fake.replies)
+	}
+}
+
+// fakePages is a pageFetcher stub for manual-submit tests.
+type fakePages struct {
+	titles map[string]string
+	err    error
+}
+
+func (f fakePages) FetchTitle(ctx context.Context, rawURL string) (string, error) {
+	if f.err != nil {
+		return "", f.err
+	}
+	return f.titles[rawURL], nil
+}
+
+func urlUpdate(updateID, messageID int64, text string) []notify.Update {
+	return []notify.Update{{
+		UpdateID: updateID,
+		Message: &notify.Message{
+			MessageID: messageID,
+			Chat:      notify.Chat{ID: 555},
+			Text:      text,
+		},
+	}}
+}
+
+func TestManualJobURL(t *testing.T) {
+	cases := map[string]bool{
+		"https://www.naukri.com/job-listings-backend-engineer-123": true,
+		"http://example.com/job":                                   true,
+		"  https://example.com/job  ":                              true, // trimmed
+		"check this out https://example.com/job":                   false,
+		"not a url":                                                false,
+		"":                                                         false,
+	}
+	for text, want := range cases {
+		_, ok := manualJobURL(text)
+		if ok != want {
+			t.Errorf("manualJobURL(%q) ok=%v, want %v", text, ok, want)
+		}
+	}
+}
+
+func TestAddManualJobInsertsNewJob(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	st, err := store.Open(filepath.Join(dir, "test.db"))
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	t.Cleanup(func() { st.Close() })
+
+	const jobURL = "https://www.naukri.com/job-listings-backend-engineer-123"
+	fake := &fakeTelegram{all: urlUpdate(1, 900, jobURL)}
+	syncer := &Syncer{
+		Store: st, TG: fake, ChatID: 555,
+		Pages: fakePages{titles: map[string]string{jobURL: "Backend Engineer - Naukri.com"}},
+	}
+
+	if _, err := syncer.Run(ctx); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	rows, err := st.ListJobs(ctx, store.JobFilter{})
+	if err != nil {
+		t.Fatalf("ListJobs: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 job inserted, got %d", len(rows))
+	}
+	j := rows[0]
+	if j.Provider != "manual" {
+		t.Errorf("Provider = %q, want manual", j.Provider)
+	}
+	if j.CompanyName != "Naukri" {
+		t.Errorf("CompanyName = %q, want Naukri (guessed from host)", j.CompanyName)
+	}
+	if j.Title != "Backend Engineer - Naukri.com" {
+		t.Errorf("Title = %q", j.Title)
+	}
+	if j.Status != store.StatusNew {
+		t.Errorf("Status = %q, want new (rides the existing tailor-resume cron)", j.Status)
+	}
+	if j.URL != jobURL {
+		t.Errorf("URL = %q", j.URL)
+	}
+
+	if len(fake.replies) != 1 {
+		t.Fatalf("expected 1 reply, got %+v", fake.replies)
+	}
+	if !strings.Contains(fake.replies[0].Text, fmt.Sprintf("#J%d", j.ID)) {
+		t.Errorf("reply %q missing #J%d tag", fake.replies[0].Text, j.ID)
+	}
+}
+
+func TestAddManualJobDuplicateURLIsNoOp(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	st, err := store.Open(filepath.Join(dir, "test.db"))
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	t.Cleanup(func() { st.Close() })
+
+	const jobURL = "https://www.naukri.com/job-listings-backend-engineer-123"
+	pages := fakePages{titles: map[string]string{jobURL: "Backend Engineer"}}
+
+	syncer1 := &Syncer{Store: st, TG: &fakeTelegram{all: urlUpdate(1, 900, jobURL)}, ChatID: 555, Pages: pages}
+	if _, err := syncer1.Run(ctx); err != nil {
+		t.Fatalf("first Run: %v", err)
+	}
+
+	fake2 := &fakeTelegram{all: urlUpdate(2, 901, jobURL)}
+	syncer2 := &Syncer{Store: st, TG: fake2, ChatID: 555, Pages: pages}
+	if _, err := syncer2.Run(ctx); err != nil {
+		t.Fatalf("second Run: %v", err)
+	}
+
+	rows, err := st.ListJobs(ctx, store.JobFilter{})
+	if err != nil {
+		t.Fatalf("ListJobs: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected still just 1 job after resubmitting the same URL, got %d", len(rows))
+	}
+	if len(fake2.replies) != 1 || fake2.replies[0].Text != "Already added that one." {
+		t.Errorf("expected a no-op reply, got %+v", fake2.replies)
+	}
+}
+
+func TestAddManualJobTitleFetchFailsStillInserts(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	st, err := store.Open(filepath.Join(dir, "test.db"))
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	t.Cleanup(func() { st.Close() })
+
+	const jobURL = "https://wellfound.com/jobs/12345"
+	fake := &fakeTelegram{all: urlUpdate(1, 900, jobURL)}
+	syncer := &Syncer{
+		Store: st, TG: fake, ChatID: 555,
+		Pages: fakePages{err: fmt.Errorf("connection refused")},
+	}
+
+	if _, err := syncer.Run(ctx); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	rows, err := st.ListJobs(ctx, store.JobFilter{})
+	if err != nil {
+		t.Fatalf("ListJobs: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected the job to still be inserted despite the title-fetch failure, got %d rows", len(rows))
+	}
+	if !strings.Contains(rows[0].Title, "title unknown") {
+		t.Errorf("Title = %q, want a placeholder mentioning the fetch failure", rows[0].Title)
 	}
 }

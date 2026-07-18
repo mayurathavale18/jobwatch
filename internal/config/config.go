@@ -12,7 +12,12 @@ import (
 type Company struct {
 	Name     string `yaml:"name"`
 	Provider string `yaml:"provider"`
-	Slug     string `yaml:"slug"`
+	// Slug identifies the company's own board for per-company providers
+	// (greenhouse/lever/ashby/workday). For search-aggregator providers
+	// (remoteok/wwr), which return jobs across many real companies in one
+	// Fetch call, it's just a label -- each returned Job carries its own
+	// real CompanySlug/CompanyName instead.
+	Slug string `yaml:"slug"`
 	// Host and Site are Workday-only: Workday postings live at
 	// https://{slug}.{host}.myworkdayjobs.com/wday/cxs/{slug}/{site}/jobs,
 	// where slug is the tenant, host is the numbered subdomain (e.g. "wd1",
@@ -68,7 +73,10 @@ func (c *Config) validate() error {
 	if len(c.Companies) == 0 {
 		return fmt.Errorf("companies: at least one company required")
 	}
-	validProviders := map[string]bool{"greenhouse": true, "lever": true, "ashby": true, "workday": true}
+	validProviders := map[string]bool{
+		"greenhouse": true, "lever": true, "ashby": true, "workday": true,
+		"remoteok": true, "wwr": true,
+	}
 	for i, co := range c.Companies {
 		if co.Name == "" {
 			return fmt.Errorf("companies[%d]: name required", i)
@@ -78,7 +86,7 @@ func (c *Config) validate() error {
 		}
 		provider := strings.ToLower(co.Provider)
 		if !validProviders[provider] {
-			return fmt.Errorf("companies[%d] (%s): unsupported provider %q (want greenhouse, lever, ashby, or workday)", i, co.Name, co.Provider)
+			return fmt.Errorf("companies[%d] (%s): unsupported provider %q (want greenhouse, lever, ashby, workday, remoteok, or wwr)", i, co.Name, co.Provider)
 		}
 		if provider == "workday" && (co.Host == "" || co.Site == "") {
 			return fmt.Errorf("companies[%d] (%s): workday requires host and site", i, co.Name)
