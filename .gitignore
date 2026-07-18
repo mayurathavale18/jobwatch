@@ -21,3 +21,5 @@ __pycache__/
 # `go build`, since the Go server embeds it via go:embed.
 frontend/node_modules/
 /internal/web/dist/
+
+creds.yml

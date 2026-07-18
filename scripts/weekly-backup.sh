@@ -1,6 +1,7 @@
 #!/bin/bash
 # Weekly backup — copy DB, rotate keeping last 4
-ROOT_DIR="$HOME/jobwatch"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(dirname "$SCRIPT_DIR")"
 LOG_DIR="$ROOT_DIR/logs"
 BACKUP_DIR="$ROOT_DIR/backups"
 mkdir -p "$BACKUP_DIR" "$LOG_DIR"

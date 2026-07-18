@@ -1,7 +1,8 @@
 #!/bin/bash
 # Poll wrapper with failure tracking
 # Outputs status to stdout for the cron agent to read
-ROOT_DIR="$HOME/jobwatch"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(dirname "$SCRIPT_DIR")"
 LOG_DIR="$ROOT_DIR/logs"
 FAILCOUNT_FILE="$ROOT_DIR/.poll_failcount"
 LOGFILE="$LOG_DIR/poll-$(date +%Y%m%d).log"

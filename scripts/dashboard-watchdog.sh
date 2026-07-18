@@ -2,7 +2,8 @@
 # Dashboard watchdog - restart if not responding
 # Outputs status to stdout for the cron agent
 
-ROOT_DIR="$HOME/jobwatch"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(dirname "$SCRIPT_DIR")"
 LOG_DIR="$ROOT_DIR/logs"
 mkdir -p "$LOG_DIR"
 source "$ROOT_DIR/scripts/lib/status.sh"
