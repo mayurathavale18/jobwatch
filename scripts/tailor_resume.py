@@ -23,10 +23,22 @@ from pathlib import Path
 # Paths and constants
 # -----------------------------------------------------------------------------
 HOME = Path.home()
-DB_PATH = HOME / "jobwatch" / "jobwatch.db"
-MASTER_TEX_PATH = HOME / "jobwatch" / "resume" / "master.tex"
-FACTS_MD_PATH = HOME / "jobwatch" / "resume" / "facts.md"
-TAILORED_JSON_PATH = HOME / "jobwatch" / "resume" / "tailored.json"
+# Resolved relative to this script's own location, not $HOME/jobwatch --
+# that assumed the repo always sits one level under $HOME, true on a laptop
+# checkout but false for the deployed jobwatch service user, whose $HOME
+# *is* the repo root already (see deploy/setup.sh's useradd --home). Same
+# bug class already fixed in the shell cron wrappers (see their own
+# comments); this Python one was missed in that pass since it was grepped
+# for "$HOME/jobwatch" in *.sh only.
+REPO_ROOT = Path(__file__).resolve().parent.parent
+DB_PATH = REPO_ROOT / "jobwatch.db"
+MASTER_TEX_PATH = REPO_ROOT / "resume" / "master.tex"
+FACTS_MD_PATH = REPO_ROOT / "resume" / "facts.md"
+TAILORED_JSON_PATH = REPO_ROOT / "resume" / "tailored.json"
+# Intentionally still $HOME-based, unlike the above: this is real output
+# meant to land in whichever environment's own home directory (the user's
+# ~/Documents on a laptop, the service user's home on the server), not a
+# path inside the repo checkout itself.
 OUTPUT_ROOT = HOME / "Documents" / "mayur-athavale-resume"
 DATE_STR = datetime.now().strftime("%d-%m-%y")
 TODAY_ISO = datetime.now().strftime("%Y-%m-%d")
