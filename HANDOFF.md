@@ -1,43 +1,45 @@
 # jobwatch — session handoff
 
-Last updated: 2026-07-16, end of session. Read this first in the next session — it has exact next steps, not just a summary.
+Last updated: 2026-07-19, end of session. Read this first — it replaces the 2026-07-16 handoff entirely, which is now stale. Also read `CLAUDE.md` for the command-level quick reference (SSH, deploy commands, recurring gotchas); this file is the narrative "what happened and why" context.
 
 ## Where things stand
 
-Hermes (a separate agent, ran via opencode on kimi/qwen models) built the resume-tailoring + cron + Telegram pipeline on top of jobwatch (the Go job-tracker I originally built). Hermes kept hitting provider rate/quota limits and left several things broken. The user handed the whole pipeline to me. Full history of what Hermes did/said is in `hermes_logs.txt` (repo root, gitignored, 2180 lines) — read it if you need to understand why a script looks the way it does.
+jobwatch is fully deployed and running 24x7 on AWS — it no longer depends on Mayur's laptop being on. This was the biggest change this session (previous handoff had AWS deploy listed as "deferred"). Full details below, but the short version: EC2 instance, Elastic IP, real domain with TLS, all six cron jobs live, verified end-to-end multiple times including mid-session bug fixes.
 
-Three follow-up features were requested, in this confirmed priority order:
+## Production deployment
 
-1. **Cron status tab in dashboard — DONE**, committed and pushed (commit `d29a046`).
-2. **Gmail-mining to expand keyword vocab + fix resume content gaps — CONFIRMED PLAN, NOT YET IMPLEMENTED.** This is the next task. Full details below.
-3. **Migrate dashboard to React+Vite — NOT STARTED.** Confirmed deploy model: Vite builds static assets, Go embeds them via `embed.FS` (same pattern as today's `html/template`), single binary stays the deploy unit, no separate Node process at runtime. Do this last, after #2, since #2 doesn't touch the frontend.
+- **EC2**: `i-074bc79b46ee82bde`, `t3.micro`, `ap-south-2` (Hyderabad), AWS profile `portfolio`. Elastic IP `16.113.24.110` (`eipalloc-0d14093253e61dbb1`).
+- **Domain**: `https://jobwatch.mayurathavale.com` — A record → the Elastic IP, real Let's Encrypt cert via certbot (expires 2026-10-16, auto-renews), nginx reverse-proxies to `127.0.0.1:8787` with HTTP Basic Auth (user `mayur`) in front — the dashboard itself has no auth of its own, so this is load-bearing.
+- **Repo location on the box**: `/opt/jobwatch`, owned by system user `jobwatch` (not `ubuntu`). Deployed via `rsync`, not `git clone` — the repo is private and there's no deploy key on the box. See `CLAUDE.md` for the exact rsync commands.
+- **Cron** (`sudo -u jobwatch crontab -l` on the box): poll every 15 min, tg-sync every 5 min (07:00–24:00 IST), tailor-resume every 30 min, dashboard-watchdog every 10 min, daily-summary 23:50 IST, weekly-backup Sunday 02:00 IST. Times are IST — the box's timezone was explicitly set to `Asia/Kolkata` (fresh Ubuntu AMIs default to UTC).
+- **The laptop's own crontab was removed** as part of the cutover (backed up first, not restored) — the server is now the single source of truth. Do not re-add laptop cron jobs; that reintroduces the dual-Telegram-consumer bug (see `CLAUDE.md`).
 
-## Task #2 — exact next steps (user said "yes" to all 4, do these)
+## What's live in the pipeline right now
 
-Already done this session, don't redo:
-- Searched Gmail for application-confirmation emails (not rejections — user's instruction: treat all ~200-300 applications from the last ~2 months as failed since no interview calls came in, no need to check for actual rejection emails).
-- Query used: `(subject:"application" OR subject:"applying" OR subject:"thank you for your interest" OR subject:"received your application") newer_than:2m -in:spam -in:trash` — 201 threads total, fully paginated through.
-- Cross-referenced companies against jobwatch.db (jobs table) — matched 3: job 82 (Stripe, Backend Engineer AI Security), job 90 (Stripe, Backend Engineer Payments and Risk), job 947 (Cloudflare, Platforms & Productivity — 404'd on refetch, posting closed).
-- Fetched real JD text for job 82 and job 90 directly from Greenhouse's API (`https://boards-api.greenhouse.io/v1/boards/stripe/jobs/{gh_jid}`, gh_jid 7826765 and 7232592). Saved to `resume/jd_82_gmail_mined.txt` and `resume/jd_90_gmail_mined.txt` — read these, don't refetch.
+**Providers** (`internal/providers/`): Greenhouse, Lever, Ashby, Workday (Stripe, Razorpay, Databricks, Elastic, Cloudflare, Wells Fargo), plus two new search aggregators added this session — **RemoteOK** (public JSON API) and **We Work Remotely** (public RSS). Both verified against live data. Naukri, Work at a Startup (YC), and Wellfound were evaluated and explicitly rejected as automatable sources — all three actively block non-browser access (reCAPTCHA / Cloudflare challenge, confirmed live via curl). Instead there's a **manual-submit flow**: send the Telegram bot a bare job URL (not a reply) and it fetches the page title, inserts it as `provider: manual`, `status: new`, and it rides the normal tailor-resume cron. See README's "Manually adding a job" section.
 
-**Findings** (from the 201 emails' job titles + the 2 real JD texts):
-- "Full Stack" is one of the most common title patterns (Barclays, PepsiCo, Broadridge, Khatabook, Freshworks, Tredence, Rippling, Databricks, Stripe, Zeta) but **the current 7 experience bullets in `resume/master.tex` are 100% backend/AI-focused — zero frontend content**, despite `resume/facts.md`'s Frontend section having real, truthful production experience (React 18, Vite, NX, the Webpack→Vite module-federation migration: "build times down 70%, dev build+local startup down 80% with HMR").
-- Golang/DevOps/Data Engineer demand is strong and already well-covered — no gap.
-- Real gaps that recur often but aren't truthfully claimable per facts.md: C++ (Coveo, DigiCert — 2 applications), and AI-security/prompt-injection-specific work (the actual Stripe JD in `jd_82_gmail_mined.txt` is literally about defending against prompt injection/jailbreaks — adjacent to but not the same as Mayur's agent work).
+**Cross-provider fuzzy dedup**: since RemoteOK/WWR can surface a posting jobwatch already tracks via a company's own ATS board (different `external_id`, same real job), there's now a fuzzy check (normalized company+title+location, any provider, 30-day window) alongside the existing exact-key dedup, in `store.ExistsFuzzyTx` / wired into `poller.go`.
 
-**Concrete changes to make** (all confirmed by user):
+**Resume tailoring** (`scripts/tailor_resume.py`, template `resume/master.tex`): fixed a real, verified root cause of a pattern of fast auto-rejections (12 of ~26 rejections in 45 days were from Amazon alone; only one application in that window progressed to an actual interview). Checked how ATS parsers actually read the generated PDF (`pdftotext`, not visual rendering) and found:
+- FontAwesome icon ligatures in the header scrambled the reading order entirely (name/phone/email came out interleaved and out of order in raw sequential extraction) — replaced with plain hyperlinked text, `fontawesome` package removed entirely.
+- Phone `+91-7972833243` → `+91 7972833243` (space, not hyphen — hyphen was preventing ATS autofill from splitting country code from number).
+- College name → `College of Engineering, Pune (COEP)` (missing comma was causing some ATS institution-matching to truncate to the generic, ambiguous "College of Engineering").
+- Skills flattened: `AWS (ECS, EC2, ...)` → `AWS, ECS, EC2, ...` — nested parens were reading as one unmatched string to ATS skill-taggers that split on top-level commas only. Fixed in **three** places that all had to match: `master.tex`, and `tailor_resume.py`'s two separate duplicate hardcoded copies of the same categories (the tailoring cron overwrites the Skills section wholesale every run, so `master.tex` alone wasn't enough — this was a real, verified propagation gap, not a hypothetical one).
+- New `inject_keyword_emphasis()`: truthful-but-uncovered JD keywords (checked against `TRUTHFUL_SKILLS`, same truth-lock discipline as before, now hoisted to a module-level constant) get folded into the top bullet as a bolded clause, overflow goes on an "Additional Relevant Skills" line, skipped in tight/one-page mode. Nothing fabricated — this closes real coverage gaps, doesn't invent skills.
 
-1. In `scripts/tailor_resume.py`'s `KEYWORD_CANDIDATES` set: add `full stack`, `fullstack`, `frontend`, `prompt engineering` (recognized + truthful — add to the `truthful_skills` list inside `score_coverage()` too), and `payments`, `risk`, `fraud`, `c++`, `ai security`, `prompt injection`, `jailbreak` (recognized-only — do NOT add to `truthful_skills`, these are real gaps, not fabrications).
-2. In `build_experience_bullets()`: add one new bullet, sourced verbatim from facts.md's Webpack→Vite migration achievement (check facts.md's Frontend section for exact wording — don't paraphrase, truth-lock requires it match what's already verified). Tag it with `"focus": ["frontend", "full_stack"]`.
-3. In `determine_focus()`: add a new branch detecting `"full stack"`, `"fullstack"`, `"frontend"` in the JD text/title → append `"frontend"` (or a new `"full_stack"` tag) to the focus list. Currently there is no frontend/full-stack focus category at all — every JD falls through to backend-only bullet selection regardless of how frontend-heavy the posting is.
-4. Report-only, no code change: tell the user C++ and AI-security/prompt-injection are real, recurring gaps in their skill set relative to market demand, for them to decide whether to invest in.
+All of the above is compiled/verified with `tectonic` + `pdftotext`/`pdfinfo`, not just read as LaTeX source — see the feedback memory on this.
 
-After making these changes: rebuild a resume via `python3 scripts/tailor_resume.py --rebuild <job_id>` for a full-stack-flavored job (or a synthetic test) and visually verify the new bullet actually gets selected and the layout still fits one page — same verify-by-actually-running discipline as the rest of this session (see feedback memory: don't trust code review alone for this pipeline, three separate real bugs were only caught by actually compiling and rendering output).
+**Filters** (`config.yaml`): broadened this session after a real gap surfaced — `"full-stack"` (hyphenated) added to `include_keywords` (WWR/RemoteOK titles use that form, the existing `"full stack"`/`"fullstack"` entries didn't match it), and `"worldwide"`/`"anywhere"` added to `locations_include` (WWR's location field says "Anywhere in the World", which doesn't contain the literal word "remote"). This will increase notification volume from the two aggregator sources specifically.
 
-## Everything else that's live right now (context, not action items)
+## Known gaps / explicitly deferred, not forgotten
 
-- Real crontab is installed (`crontab -l` to check): poll every 15 min, tg-sync every 5 min (07:00–24:00 IST), tailor-resume every 30 min, dashboard-watchdog every 10 min, daily-summary 23:50 IST, weekly-backup Sunday 02:00 IST.
-- `master.tex` layout: geometry fixed (was ~19pt taller than the physical page — see the comment right above `\addtolength{\textheight}{1.5in}`), and all three section-boundary `\vspace` are now `4pt plus 1fill` (evenly-distributed stretchable glue = the "space-evenly" idea) instead of the old one-sided `\vfill`.
-- tg-sync's "fix" reply handling is consolidated into the Go binary (`internal/tgsync/tgsync.go`) as the single Telegram `getUpdates` consumer — do not reintroduce a second independent poller anywhere (that was the original bug: two consumers race for the same bot's updates, whichever polls first silently eats it).
-- Dashboard has two pages now: `/` (jobs) and `/cron` (job health, reads `logs/*.status.json` written by `scripts/lib/status.sh`, sourced by every wrapper script).
-- `.env` has real Telegram credentials (bot token + chat id) already verified working multiple times this session — safe to `source .env` and use directly.
+1. **`tailor_resume.py` never retries a failed job automatically** — once a job ID has any entry in `tailored.json`, `main()` skips it forever, success or failure. Worked around manually once this session (`rebuild_one(job_id)` bypasses it) but the underlying gap is still there. Worth fixing properly if failures start piling up.
+2. **HN "Who's Hiring" as a fourth source** — considered, deferred. Postings are freeform comment text, not structured fields; real NLP-lite parsing effort for uncertain reliability. Not started.
+3. **Item C from earlier in this session — LinkedIn/referral contact-finder + outreach email drafting — not built.** Mayur chose "role-based emails only" (no scraping) as the approach after the ban-risk was flagged, but the actual feature (job relevance ranking, targeting 2-3yr-experience reqs specifically, generating short outreach email drafts) was never designed or scoped, let alone built. This is the natural next thing to pick up.
+4. Cosmetic: a stray floating bullet next to "Software Development Engineer" / "College of Engineering, Pune" in the rendered resume PDF (pre-existing `itemize[leftmargin=0pt]` quirk, unrelated to any of this session's fixes, never addressed).
+
+## Verification habits that mattered this session (keep doing these)
+
+- After any deploy, actually run the wrapper script on the server and read its output — don't infer success from "the rsync didn't error."
+- After any resume-template change, actually compile with `tectonic` and run `pdftotext`/`pdfinfo` on the output — LaTeX source review alone missed real bugs (the FontAwesome ligature corruption wasn't visible by reading the `.tex`, only by extracting the PDF's actual text).
+- Before running a live poll/notify test against production Telegram, make sure the DB is actually current first (WAL-checkpoint gotcha above) — a stale-DB test poll caused a real duplicate-notification incident earlier this session.
