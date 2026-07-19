@@ -101,13 +101,22 @@ func parseRemoteOK(raw []json.RawMessage) ([]Job, error) {
 			url = j.ApplyURL
 		}
 
+		// RemoteOK is a remote-only board -- an empty location means
+		// "no restriction" (worldwide), not "unknown". Left as "" it
+		// silently fails every locations_include filter, even though
+		// the posting is exactly what that filter is looking for.
+		location := j.Location
+		if strings.TrimSpace(location) == "" {
+			location = "Worldwide"
+		}
+
 		jobs = append(jobs, Job{
 			Provider:    "remoteok",
 			CompanySlug: slugify(j.Company),
 			CompanyName: j.Company,
 			ExternalID:  j.ID,
 			Title:       j.Position,
-			Location:    j.Location,
+			Location:    location,
 			URL:         url,
 			PostedAt:    postedAt,
 			FirstSeenAt: time.Now().UTC(),

@@ -156,8 +156,8 @@ func TestParseRemoteOK(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parseRemoteOKJSON: %v", err)
 	}
-	if len(jobs) != 3 {
-		t.Fatalf("expected 3 jobs (legal blurb entry skipped), got %d", len(jobs))
+	if len(jobs) != 4 {
+		t.Fatalf("expected 4 jobs (legal blurb entry skipped), got %d", len(jobs))
 	}
 
 	j := jobs[0]
@@ -189,6 +189,14 @@ func TestParseRemoteOK(t *testing.T) {
 	j3 := jobs[2]
 	if j3.URL != "https://remoteok.com/remote-jobs/apply/9999" {
 		t.Errorf("third entry URL = %q, want apply_url fallback", j3.URL)
+	}
+
+	// Fourth entry has no location in the API response -- RemoteOK is a
+	// remote-only board, so this should normalize to "Worldwide" rather
+	// than staying empty and silently failing every locations_include filter.
+	j4 := jobs[3]
+	if j4.Location != "Worldwide" {
+		t.Errorf("fourth entry Location = %q, want \"Worldwide\" (empty-location fallback)", j4.Location)
 	}
 }
 
