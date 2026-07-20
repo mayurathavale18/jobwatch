@@ -230,3 +230,25 @@ def test_build_skills_section_lists_jd_matched_keyword_first():
 
     assert first_language_in_line(section_without_match) == "Go"
     assert first_language_in_line(section_with_match) == "Python"
+
+
+def test_inject_keyword_emphasis_hedges_familiar_tier_keyword():
+    bullets = ["Built a backend service using Go and PostgreSQL."]
+    skills_section = "\\techSkill{Languages}{Go, Python}"
+    jd_keywords = ["kafka"]  # hedged_familiar tier, not in TRUTHFUL_SKILLS
+
+    new_bullets, extra_line = tr.inject_keyword_emphasis(bullets, skills_section, jd_keywords)
+    combined = new_bullets[0] + (extra_line or "")
+    assert "Kafka" in combined
+    # Must use hedging language, not a plain/confident claim.
+    assert any(hedge in combined for hedge in ("exposure to", "familiarity with", "working knowledge of"))
+
+
+def test_inject_keyword_emphasis_never_touches_fabrication_risk_keyword():
+    bullets = ["Built a backend service using Go and PostgreSQL."]
+    skills_section = "\\techSkill{Languages}{Go, Python}"
+    jd_keywords = ["salesforce"]  # fabrication_risk tier
+
+    new_bullets, extra_line = tr.inject_keyword_emphasis(bullets, skills_section, jd_keywords)
+    combined = new_bullets[0] + (extra_line or "")
+    assert "Salesforce" not in combined and "salesforce" not in combined

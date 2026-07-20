@@ -665,35 +665,45 @@ def build_experience_bullets(focus, jd_keywords, tight=False):
 MAX_INJECTED_KEYWORDS = 3
 
 def inject_keyword_emphasis(bullets, skills_section, jd_keywords):
-    """Close truthful JD-keyword coverage gaps without fabricating anything.
+    """Close JD-keyword coverage gaps without fabricating anything.
 
-    A JD keyword can be truthful (per TRUTHFUL_SKILLS) but still missing
-    from the resume text simply because none of the fixed bullets happen to
-    mention it -- e.g. a JD asking for "CI/CD" explicitly when the bullet
-    text says "GitHub Actions" but never the literal term "CI/CD". That's a
-    real, closeable coverage gap, not a fabrication risk (score_coverage
-    already keeps the "not_truthful" case, i.e. real gaps, separate and
-    those are never touched here).
-
-    Up to MAX_INJECTED_KEYWORDS such gaps get folded into the single
-    highest-relevance bullet (bullets[0] -- build_experience_bullets already
-    returns bullets sorted by focus/keyword match) as a short bolded clause.
-    Anything past that cap goes on a plain "Additional Relevant Skills" line
-    instead of bloating one bullet indefinitely.
+    Direct-tier gaps (facts.md production/used skills missing from the
+    fixed bullet text) get folded in plainly, same as before. Hedged-tier
+    gaps (facts.md familiar tier, or Mayur's curated ADJACENT_SKILLS) get
+    folded in too, but only with explicit hedging language -- never
+    phrased as hands-on. Fabrication-risk keywords
+    (score_coverage_tiered's "missing" bucket that isn't hedge-eligible)
+    are never touched here.
     """
     draft_text = skills_section + "\n" + "\n".join(bullets)
-    _, _, not_covered, _ = score_coverage(jd_keywords, draft_text)
-    if not not_covered:
+    result = score_coverage_tiered(jd_keywords, draft_text)
+
+    # Direct-tier gaps: present in jd_keywords, not yet in draft_text, and
+    # classify as "direct" (i.e. would have landed in old score_coverage's
+    # not_covered bucket).
+    direct_gaps = [kw for kw in jd_keywords
+                   if not keyword_in_text(kw, draft_text) and classify_keyword(kw) == "direct"]
+    hedged_gaps = [kw for kw in jd_keywords
+                   if not keyword_in_text(kw, draft_text)
+                   and classify_keyword(kw) in ("hedged_familiar", "hedged_adjacent")]
+
+    if not direct_gaps and not hedged_gaps:
         return bullets, None
 
-    inject_now, remaining = not_covered[:MAX_INJECTED_KEYWORDS], not_covered[MAX_INJECTED_KEYWORDS:]
+    bullets = list(bullets)
+    inject_direct, remaining_direct = direct_gaps[:MAX_INJECTED_KEYWORDS], direct_gaps[MAX_INJECTED_KEYWORDS:]
+    inject_hedged, remaining_hedged = hedged_gaps[:MAX_INJECTED_KEYWORDS], hedged_gaps[MAX_INJECTED_KEYWORDS:]
 
-    if inject_now and bullets:
-        bolded = ", ".join(f"\\textbf{{{canonical_case(kw)}}}" for kw in inject_now)
-        bullets = list(bullets)
+    if inject_direct and bullets:
+        bolded = ", ".join(f"\\textbf{{{canonical_case(kw)}}}" for kw in inject_direct)
         bullets[0] = bullets[0].rstrip() + f" Also applies {bolded} in this work."
 
+    if inject_hedged and bullets:
+        hedged_list = ", ".join(canonical_case(kw) for kw in inject_hedged)
+        bullets[0] = bullets[0].rstrip() + f" Has working exposure to {hedged_list} for adjacent needs."
+
     extra_skills_line = None
+    remaining = remaining_direct + remaining_hedged
     if remaining:
         plain = ", ".join(canonical_case(kw) for kw in remaining)
         extra_skills_line = f"\\techSkill{{Additional Relevant Skills}}{{{plain}}}"
