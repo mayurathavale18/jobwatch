@@ -93,3 +93,35 @@ def test_html_to_jd_text_converts_br_tags_to_newlines():
     text = tr.html_to_jd_text(html_input)
     lines = [l.strip() for l in text.split("\n") if l.strip()]
     assert lines == ["First line.", "Second line.", "Third line.", "Fourth line."]
+
+
+def test_call_opencode_returns_none_without_api_key(monkeypatch):
+    monkeypatch.setattr(tr, "OPENCODE_API_KEY", "")
+    assert tr.call_opencode("system", "user") is None
+
+
+def test_call_opencode_returns_content_on_success(monkeypatch):
+    monkeypatch.setattr(tr, "OPENCODE_API_KEY", "fake-key")
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            return False
+        def read(self):
+            import json as _json
+            return _json.dumps({
+                "choices": [{"message": {"content": "hello from the model"}}]
+            }).encode("utf-8")
+
+    monkeypatch.setattr(tr, "urlopen", lambda req, timeout=20: FakeResponse())
+    result = tr.call_opencode("system prompt", "user prompt")
+    assert result == "hello from the model"
+
+
+def test_call_opencode_returns_none_on_http_error(monkeypatch):
+    monkeypatch.setattr(tr, "OPENCODE_API_KEY", "fake-key")
+    def raise_error(*args, **kwargs):
+        raise OSError("timed out")
+    monkeypatch.setattr(tr, "urlopen", raise_error)
+    assert tr.call_opencode("system", "user") is None

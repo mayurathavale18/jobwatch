@@ -51,6 +51,13 @@ RATE_LIMIT_SECONDS = 60
 TG_TOKEN = os.environ.get("JOBWATCH_TG_TOKEN", "")
 TG_CHAT = os.environ.get("JOBWATCH_TG_CHAT", "")
 
+# OpenCode Go config (OpenAI-compatible gateway, https://opencode.ai/docs/zen).
+# Used only for JD extraction fallback (Task 9), judging (Task 10), and
+# bounded bullet rewording (Task 13) -- never for resume content selection.
+OPENCODE_API_KEY = os.environ.get("OPENCODE_API_KEY", "")
+OPENCODE_BASE_URL = "https://opencode.ai/zen/go/v1"
+DEFAULT_OPENCODE_MODEL = "deepseek-v4-pro"
+
 # -----------------------------------------------------------------------------
 # Logging helpers
 # -----------------------------------------------------------------------------
@@ -165,6 +172,40 @@ def fetch_jd_generic(url):
         "location": "",
         "absolute_url": url,
     }
+
+def call_opencode(system_prompt, user_content, model=DEFAULT_OPENCODE_MODEL, timeout=20):
+    """Call OpenCode Go's OpenAI-compatible chat completions endpoint.
+    Returns the assistant's raw message content, or None on any failure
+    (missing key, timeout, non-200, malformed response) -- callers always
+    have a non-LLM fallback and must never block on this.
+    """
+    if not OPENCODE_API_KEY:
+        return None
+
+    payload = json.dumps({
+        "model": model,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_content},
+        ],
+    }).encode("utf-8")
+
+    try:
+        req = Request(
+            f"{OPENCODE_BASE_URL}/chat/completions",
+            data=payload,
+            method="POST",
+            headers={
+                "Authorization": f"Bearer {OPENCODE_API_KEY}",
+                "Content-Type": "application/json",
+            },
+        )
+        with urlopen(req, timeout=timeout) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        return data["choices"][0]["message"]["content"]
+    except Exception as e:
+        log(f"WARN: OpenCode call failed: {e}")
+        return None
 
 def extract_gh_job_id(url):
     m = re.search(r"gh_jid=(\d+)", url)
