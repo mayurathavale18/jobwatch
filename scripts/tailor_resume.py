@@ -213,6 +213,65 @@ TRUTHFUL_SKILLS = {
     "security", "networking",
 }
 
+# Facts.md's "familiar" tier: concepts known, NOT hands-on production use.
+# A JD keyword landing here is eligible for a resume claim, but only with
+# hedging language ("exposure to", "familiarity with") -- never phrased as
+# if hands-on. See facts.md's "Skills inventory (honesty tiers)" section.
+FAMILIAR_SKILLS = {
+    "kafka", "kubernetes", "k8s", "gcp", "langchain", "mongodb", "rabbitmq",
+    "trpc", "firebase",
+}
+
+# Mayur's curated "soft hand" tools -- see facts.md's "Adjacent Skills"
+# section, which this must be kept in sync with (same manual-sync pattern
+# as TRUTHFUL_SKILLS itself). Not in facts.md's production/used/familiar
+# tiers at all, but a fair hedged "exposure to" claim per his own judgment.
+ADJACENT_SKILLS = {
+    "cassandra", "bigquery", "ansible", "jenkins",
+    "pytorch", "tensorflow", "scikit-learn",
+    "kotlin", "spring", "spring boot",
+}
+
+def classify_keyword(kw):
+    """Classify a JD keyword into one of four honesty tiers for resume
+    claims: "direct" (facts.md production/used tier, claim plainly),
+    "hedged_familiar" (facts.md familiar tier, claim only with hedge
+    language), "hedged_adjacent" (Mayur's curated ADJACENT_SKILLS, claim
+    only with hedge language), or "fabrication_risk" (nothing related at
+    all -- never claimed).
+    """
+    if kw in TRUTHFUL_SKILLS:
+        return "direct"
+    if kw in FAMILIAR_SKILLS:
+        return "hedged_familiar"
+    if kw in ADJACENT_SKILLS:
+        return "hedged_adjacent"
+    return "fabrication_risk"
+
+def score_coverage_tiered(keywords, resume_text):
+    """Like score_coverage, but buckets keywords by honesty tier instead
+    of a flat covered/not-covered split. Returns a dict with:
+    - score: fraction of `keywords` actually present in resume_text
+    - direct: direct-tier keywords present in resume_text
+    - hedged: hedged-tier (familiar or adjacent) keywords present in
+      resume_text
+    - missing: keywords absent from resume_text, regardless of tier
+      (includes fabrication_risk keywords, which should never be
+      injected regardless of presence)
+    """
+    direct, hedged, missing = [], [], []
+    for kw in keywords:
+        present = keyword_in_text(kw, resume_text)
+        tier = classify_keyword(kw)
+        if present and tier == "direct":
+            direct.append(kw)
+        elif present and tier in ("hedged_familiar", "hedged_adjacent"):
+            hedged.append(kw)
+        else:
+            missing.append(kw)
+    score = (len(direct) + len(hedged)) / len(keywords) if keywords else 1.0
+    return {"score": round(score, 2), "direct": direct, "hedged": hedged, "missing": missing}
+
 # Display casing for keywords that might get injected into bullet text or
 # the Additional Skills line (see inject_keyword_emphasis) -- KEYWORD_CANDIDATES
 # and TRUTHFUL_SKILLS are stored lowercase for matching, but the resume text
