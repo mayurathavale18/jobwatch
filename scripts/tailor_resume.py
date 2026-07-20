@@ -1136,6 +1136,140 @@ def rebuild_one(job_id, reply_to_message_id=None):
         update_job_status(job_id, "shortlisted")
     return tg_ok, (None if tg_ok else tg_error)
 
+def process_job(job, tailored):
+    """Process one job dict from the jobs table: fetch JD (Greenhouse API,
+    falling back to fetch_jd_generic for anything else), generate and
+    compile the resume, score it, judge it, and send Telegram. Mutates and
+    returns `tailored` (the job-id-keyed tracker dict) plus one of
+    "sent"/"failed"/"skipped_non_eng". Shared by main()'s batch loop and
+    the --job-id one-off path (see the bottom of this file) -- unlike
+    rebuild_one(), this works for a job with NO pre-existing tracker
+    entry, which a fresh manual submission always starts as.
+    """
+    jid = str(job["id"])
+    company = job.get("company_name") or "Unknown"
+    title = job.get("title") or "Unknown"
+    url = job.get("url") or ""
+
+    log(f"\n--- Processing ID {jid}: {company} — {title} ---")
+
+    gh_slug = company_slug(company, url)
+    gh_id = extract_gh_job_id(url)
+    jd_data = None
+    if gh_id and gh_slug:
+        jd_data = fetch_greenhouse_job(gh_slug, gh_id)
+
+    jd_unavailable = False
+    if not jd_data:
+        jd_data = fetch_jd_generic(url)
+    if not jd_data or len(jd_data.get("content_text", "")) < MIN_USABLE_JD_CHARS:
+        log(f"WARN: Could not fetch usable JD for {jid}; using title only")
+        jd_unavailable = True
+        jd_data = {
+            "title": title, "company_name": company, "content_text": title,
+            "content_html": "", "location": "", "absolute_url": url,
+        }
+
+    jd_text = jd_data.get("content_text", "")
+
+    if not is_engineering_role(title, jd_text):
+        log(f"SKIPPED (non-engineering): {title}")
+        tailored[jid] = {
+            "company": company, "title": title, "url": url,
+            "pdf_path": None, "tex_path": None, "coverage_score": None,
+            "status": "ignored",
+            "error": "Non-engineering role; facts.md does not support claims. Skipped per truth lock.",
+            "tailored_date": datetime.now().isoformat(),
+        }
+        save_tailored(tailored)
+        update_job_status(jid, "ignored")
+        return tailored, "skipped_non_eng"
+
+    comp_slug = company_slug(company, url)
+    title_slug = slugify(title)
+    out_dir = OUTPUT_ROOT / comp_slug
+    out_dir.mkdir(parents=True, exist_ok=True)
+    base_name = f"mayur_athavale_resume_{comp_slug}_{title_slug}_{DATE_STR}"
+    tex_path = out_dir / f"{base_name}.tex"
+    pdf_path = out_dir / f"{base_name}.pdf"
+
+    attempt = 0
+    success = False
+    final_error = None
+    resume_text = ""
+    jd_keywords = []
+
+    while attempt < 2 and not success:
+        attempt += 1
+        tight = (attempt == 2)
+        log(f"  Attempt {attempt} (tight={tight})...")
+
+        tex_content, focus, jd_keywords = generate_resume(job, jd_data, tight=tight)
+        with open(tex_path, "w", encoding="utf-8") as f:
+            f.write(tex_content)
+
+        ok, output = compile_tex(tex_path)
+        if not ok:
+            log(f"  Compile failed: {output[:500]}")
+            final_error = output
+            continue
+
+        pages = get_page_count(pdf_path)
+        log(f"  Pages: {pages}")
+        if pages != 1:
+            log(f"  PDF has {pages} pages; retrying with tighter content")
+            final_error = f"Page overflow: {pages} pages"
+            continue
+
+        resume_text = tex_content
+        success = True
+
+    if not success:
+        log(f"  FAILED after 2 attempts: {(final_error or '')[:200]}")
+        tailored[jid] = {
+            "company": company, "title": title, "url": url,
+            "pdf_path": None, "tex_path": str(tex_path) if tex_path.exists() else None,
+            "coverage_score": None, "status": "failed", "error": final_error,
+            "tailored_date": datetime.now().isoformat(),
+        }
+        save_tailored(tailored)
+        return tailored, "failed"
+
+    tiered = score_coverage_tiered(jd_keywords, resume_text)
+    score, covered, not_covered, not_truthful = score_coverage(jd_keywords, resume_text)
+    log(f"  Coverage score: {score} ({len(covered)}/{len(jd_keywords)} keywords)")
+
+    judgment = llm_judge(jd_text, resume_text, title, company)
+
+    tailored[jid] = {
+        "company": company, "title": title, "url": url,
+        "pdf_path": str(pdf_path), "tex_path": str(tex_path),
+        "coverage_score": score, "status": "done", "error": None,
+        "tailored_date": datetime.now().isoformat(),
+        "keywords": jd_keywords, "covered_keywords": covered,
+        "not_covered_keywords": not_covered, "not_truthful_keywords": not_truthful,
+        "hedged_keywords": tiered["hedged"],
+        "verdict": judgment["verdict"], "verdict_source": judgment["source"],
+        "verdict_reason": judgment["reason"], "missing_keywords": judgment["missing_keywords"],
+        "jd_unavailable": jd_unavailable,
+    }
+    save_tailored(tailored)
+
+    log(f"  Sending Telegram notification...")
+    tg_ok, tg_error = send_telegram(pdf_path, company, title, url, score, jid, judgment=judgment,
+                                     hedged_keywords=tiered["hedged"], jd_unavailable=jd_unavailable)
+    if not tg_ok:
+        log(f"  Telegram failed: {tg_error}")
+        tailored[jid]["telegram_error"] = tg_error
+        save_tailored(tailored)
+        return tailored, "failed"
+
+    tailored[jid]["telegram_error"] = None
+    save_tailored(tailored)
+    update_job_status(jid, "shortlisted")
+    return tailored, "sent"
+
+
 def main():
     log("=== Jobwatch Resume Tailoring Agent ===")
 
@@ -1190,151 +1324,16 @@ def main():
         if processed >= to_process:
             break
 
-        jid = str(job["id"])
-        company = job.get("company_name") or "Unknown"
-        title = job.get("title") or "Unknown"
-        url = job.get("url") or ""
+        tailored, outcome = process_job(job, tailored)
 
-        log(f"\n--- Processing ID {jid}: {company} — {title} ---")
-
-        # Fetch JD
-        gh_slug = company_slug(company, url)
-        gh_id = extract_gh_job_id(url)
-        jd_data = None
-        if gh_id and gh_slug:
-            jd_data = fetch_greenhouse_job(gh_slug, gh_id)
-
-        if not jd_data:
-            log(f"WARN: Could not fetch JD for {jid}; using title only")
-            jd_data = {
-                "title": title,
-                "company_name": company,
-                "content_text": title,
-                "content_html": "",
-                "location": "",
-                "absolute_url": url,
-            }
-
-        jd_text = jd_data.get("content_text", "")
-
-        # Skip non-engineering roles
-        if not is_engineering_role(title, jd_text):
-            log(f"SKIPPED (non-engineering): {title}")
-            tailored[jid] = {
-                "company": company,
-                "title": title,
-                "url": url,
-                "pdf_path": None,
-                "tex_path": None,
-                "coverage_score": None,
-                "status": "ignored",
-                "error": "Non-engineering role; facts.md does not support claims. Skipped per truth lock.",
-                "tailored_date": datetime.now().isoformat(),
-            }
-            save_tailored(tailored)
-            update_job_status(jid, "ignored")
-            skipped_non_eng += 1
-            continue
-
-        # Generate resume
-        comp_slug = company_slug(company, url)
-        title_slug = slugify(title)
-        out_dir = OUTPUT_ROOT / comp_slug
-        out_dir.mkdir(parents=True, exist_ok=True)
-        base_name = f"mayur_athavale_resume_{comp_slug}_{title_slug}_{DATE_STR}"
-        tex_path = out_dir / f"{base_name}.tex"
-        pdf_path = out_dir / f"{base_name}.pdf"
-
-        attempt = 0
-        success = False
-        final_error = None
-        resume_text = ""
-
-        while attempt < 2 and not success:
-            attempt += 1
-            tight = (attempt == 2)
-            log(f"  Attempt {attempt} (tight={tight})...")
-
-            tex_content, focus, jd_keywords = generate_resume(job, jd_data, tight=tight)
-
-            # Write tex
-            with open(tex_path, "w", encoding="utf-8") as f:
-                f.write(tex_content)
-
-            # Compile
-            ok, output = compile_tex(tex_path)
-            if not ok:
-                log(f"  Compile failed: {output[:500]}")
-                final_error = output
-                continue
-
-            # Verify page count
-            pages = get_page_count(pdf_path)
-            log(f"  Pages: {pages}")
-            if pages != 1:
-                log(f"  PDF has {pages} pages; retrying with tighter content")
-                final_error = f"Page overflow: {pages} pages"
-                continue
-
-            # Build resume text for coverage scoring
-            resume_text = tex_content
-            success = True
-
-        if not success:
-            log(f"  FAILED after 2 attempts: {final_error[:200]}")
-            tailored[jid] = {
-                "company": company,
-                "title": title,
-                "url": url,
-                "pdf_path": None,
-                "tex_path": str(tex_path) if tex_path.exists() else None,
-                "coverage_score": None,
-                "status": "failed",
-                "error": final_error,
-                "tailored_date": datetime.now().isoformat(),
-            }
-            save_tailored(tailored)
+        if outcome == "sent":
+            processed += 1
+        elif outcome == "failed":
             failed += 1
-            continue
+        elif outcome == "skipped_non_eng":
+            skipped_non_eng += 1
 
-        # Score coverage
-        score, covered, not_covered, not_truthful = score_coverage(jd_keywords, resume_text)
-        log(f"  Coverage score: {score} ({len(covered)}/{len(jd_keywords)} keywords)")
-
-        # Update tracker
-        tailored[jid] = {
-            "company": company,
-            "title": title,
-            "url": url,
-            "pdf_path": str(pdf_path),
-            "tex_path": str(tex_path),
-            "coverage_score": score,
-            "status": "done",
-            "error": None,
-            "tailored_date": datetime.now().isoformat(),
-            "keywords": jd_keywords,
-            "covered_keywords": covered,
-            "not_covered_keywords": not_covered,
-            "not_truthful_keywords": not_truthful,
-        }
-        save_tailored(tailored)
-
-        # Send Telegram notification
-        log(f"  Sending Telegram notification...")
-        tg_ok, tg_error = send_telegram(pdf_path, company, title, url, score, jid)
-        if not tg_ok:
-            log(f"  Telegram failed: {tg_error}")
-            tailored[jid]["telegram_error"] = tg_error
-            save_tailored(tailored)
-        else:
-            tailored[jid]["telegram_error"] = None
-            save_tailored(tailored)
-            update_job_status(jid, "shortlisted")
-
-        processed += 1
-
-        # Rate limit between messages
-        if processed < to_process:
+        if outcome == "sent" and processed < to_process:
             log(f"  Rate limit: sleeping {RATE_LIMIT_SECONDS}s...")
             time.sleep(RATE_LIMIT_SECONDS)
 
@@ -1353,5 +1352,26 @@ if __name__ == "__main__":
             print(f"REBUILD_FAILED: {_err}", file=sys.stderr)
             sys.exit(1)
         print("REBUILD_OK")
+    elif len(sys.argv) > 1 and sys.argv[1] == "--job-id":
+        if len(sys.argv) < 3:
+            print("Usage: tailor_resume.py --job-id <job_id>", file=sys.stderr)
+            sys.exit(1)
+        _job_id = sys.argv[2]
+        if not shutil.which("tectonic") or not shutil.which("pdfinfo"):
+            print("ERROR: tectonic/pdfinfo not found", file=sys.stderr)
+            sys.exit(1)
+        _conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
+        _conn.row_factory = sqlite3.Row
+        _row = _conn.execute("SELECT * FROM jobs WHERE id=?", (int(_job_id),)).fetchone()
+        _conn.close()
+        if not _row:
+            print(f"JOB_ID_NOT_FOUND: {_job_id}", file=sys.stderr)
+            sys.exit(1)
+        _tailored = load_tailored()
+        _tailored, _outcome = process_job(dict(_row), _tailored)
+        if _outcome == "failed":
+            print(f"PROCESS_JOB_FAILED: {_tailored.get(_job_id, {}).get('error', 'unknown error')}", file=sys.stderr)
+            sys.exit(1)
+        print(f"PROCESS_JOB_{_outcome.upper()}")
     else:
         main()

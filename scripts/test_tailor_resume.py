@@ -324,3 +324,30 @@ def test_significant_words_strips_latex_markup():
     words = tr._significant_words("Built a \\textbf{Go-based API gateway} routing traffic.")
     assert "textbf" not in words
     assert "based" in words or "gateway" in words
+
+
+def test_process_job_skips_non_engineering_role(monkeypatch, tmp_path):
+    monkeypatch.setattr(tr, "TAILORED_JSON_PATH", tmp_path / "tailored.json")
+    job = {"id": 1, "company_name": "Acme", "title": "Account Executive", "url": "https://example.com/1"}
+    tailored, outcome = tr.process_job(job, {})
+    assert outcome == "skipped_non_eng"
+    assert tailored["1"]["status"] == "ignored"
+
+
+def test_process_job_marks_failed_when_compile_fails(monkeypatch, tmp_path):
+    monkeypatch.setattr(tr, "TAILORED_JSON_PATH", tmp_path / "tailored.json")
+    monkeypatch.setattr(tr, "OUTPUT_ROOT", tmp_path / "output")
+    monkeypatch.setattr(
+        tr, "fetch_greenhouse_job", lambda slug, gh_id: None,
+    )
+    monkeypatch.setattr(
+        tr, "fetch_jd_generic",
+        lambda url: {"title": "", "company_name": "", "content_text": "Backend Engineer role.",
+                      "content_html": "", "location": "", "absolute_url": url},
+    )
+    monkeypatch.setattr(tr, "compile_tex", lambda tex_path: (False, "fake LaTeX error"))
+
+    job = {"id": 2, "company_name": "Acme", "title": "Backend Engineer", "url": "https://example.com/2"}
+    tailored, outcome = tr.process_job(job, {})
+    assert outcome == "failed"
+    assert tailored["2"]["status"] == "failed"
