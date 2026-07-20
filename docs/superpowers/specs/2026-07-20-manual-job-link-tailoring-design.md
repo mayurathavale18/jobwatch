@@ -34,17 +34,54 @@ job and lets it ride the 30-minute `tailor-resume` cron. Two gaps:
   rule-based cross-check, not a replacement.
 - Make the generated resume itself more keyword-forward for a 5-10 second
   human scan, without weakening the existing truth-lock (never claim a
-  skill absent from `facts.md`/`TRUTHFUL_SKILLS`).
+  skill absent from `facts.md`/`TRUTHFUL_SKILLS`) — while allowing
+  clearly-hedged "familiarity with" / "exposure to" claims for tools
+  that are in `facts.md`'s `familiar` tier or genuinely adjacent to a
+  real production skill (see "Honesty tiers" below). Reword bullet
+  *phrasing* per JD where it helps attention, without changing what
+  experience is claimed.
 
 ## Non-goals
 
-- Not routing resume *content generation* through an LLM. Generation
-  stays deterministic/template-based (`build_experience_bullets`,
-  `build_skills_section`, `inject_keyword_emphasis`) — only JD extraction
-  and post-hoc judging call an LLM. This preserves the truth-lock
-  guarantees fixed in the previous session and avoids fabrication risk.
+- Not letting an LLM *select or invent* resume content. It may reword an
+  already-selected bullet's phrasing (see "Honesty tiers" and "Resume
+  content changes" below), but never adds a metric, action, or outcome
+  that isn't already in `facts.md` or the original bullet.
 - Not solving JS-rendered/SPA job pages that return near-empty HTML on a
   plain GET. Flagged as a known limitation below, not solved by this spec.
+
+## Honesty tiers for JD keyword claims
+
+`facts.md` already defines three tiers per skill (`production` /
+`used` / `familiar`, see its "Skills inventory" section), but
+`tailor_resume.py`'s `TRUTHFUL_SKILLS` today treats them as one flat
+"claimable" set — no distinction in how confidently something gets
+worded. Revision: give JD-keyword handling four buckets instead of two.
+
+1. **Direct-claim** (facts.md `production`/`used` tier, i.e. today's
+   `TRUTHFUL_SKILLS`): stated plainly, no hedge — unchanged from today.
+2. **Hedged-claim, in facts.md** (facts.md `familiar` tier — e.g. Kafka,
+   GCP specifics, Kubernetes depth, LangChain, RabbitMQ, MongoDB,
+   Firebase, tRPC, Next.js where marked `familiar`): may appear on the
+   resume, but only with hedging language ("familiarity with", "working
+   knowledge of", "exposure to") — never phrased as if hands-on/production.
+3. **Hedged-claim, adjacent** (NEW — a JD keyword not in `facts.md` at
+   all, but adjacent to a real `production`-tier skill): a small curated
+   map, e.g. Terraform (production) → fair to claim exposure to Pulumi,
+   Ansible, CloudFormation; Kubernetes (familiar) → Helm, ArgoCD. Curated
+   by Mayur, mirrors how `TRUTHFUL_SKILLS`/`KEYWORD_CANDIDATES` are
+   already hand-maintained in code rather than parsed from `facts.md` —
+   same pattern, not a new parsing layer. Lives as a new `ADJACENCY_MAP`
+   dict in `tailor_resume.py`, cross-referenced against a new "Adjacent
+   tool exposure" section added to `facts.md` so both stay in sync the
+   same way the Skills section duplication already requires (per
+   HANDOFF's note on `master.tex` / `tailor_resume.py` staying matched).
+4. **Everything else**: not added, stays in the LLM judge's/coverage's
+   "missing" list — unchanged fabrication boundary.
+
+`score_coverage` gains a third bucket alongside covered/not-covered:
+`hedged` (buckets 2 and 3 above), so the Telegram message can show what
+got added with a hedge, not just silently blend it into "covered."
 
 ## Architecture
 
@@ -162,30 +199,80 @@ state.
   {company} — {title}
   Verdict: {SCREEN ✅ | REJECT-RISK ⚠️} — {reason}
   Coverage: {score}/1.0
+  Hedged (adjacent/familiar): {comma-joined hedged keywords actually added, if any}
   Missing: {comma-joined missing_keywords, up to ~5}
   Apply: {url}
   #J{id}
   ```
+  The new "Hedged" line exists so Mayur sees exactly what got a softened
+  claim before applying — transparency check, not just a silent resume
+  edit.
   (PDF attachment unchanged; `#J{id}` tag unchanged so existing reply
   commands — applied/skip/fix/note — keep working with no changes needed
   in `tgsync.go`.)
 
-### Resume content changes (deterministic, no LLM)
+### Resume content changes
 
 Generation already selects a JD-matched focus category
 (`determine_focus`) and ranks bullets by JD keyword overlap
 (`build_experience_bullets`'s `score()` function) — this is already
-JD-specific, just not aggressively surfaced. Two targeted tightenings:
+JD-specific, just not aggressively surfaced or worded. Selection stays
+exactly as-is (deterministic, unchanged); what's new is a bounded LLM
+rewording pass on top of it:
 
-1. `build_experience_bullets`: when a bullet's top-ranked JD keyword
-   match exists, prefer phrasing/reordering that puts it within the
-   bullet's first ~5 words (recruiter eye-tracking scan pattern), not
-   just anywhere in the bullet.
-2. `build_skills_section`: within each category line, list JD-matched
+1. `build_skills_section`: within each category line, list JD-matched
    keywords first, not in the current alphabetical/as-authored order.
+   Hedged-tier keywords (bucket 2/3 above) get appended with their hedge
+   phrasing, distinct from direct-claim keywords.
+2. New `llm_reword_bullet(bullet_text, direct_keywords, hedged_keywords)`:
+   called once per selected bullet (the selection from
+   `build_experience_bullets` is untouched — this only reworks phrasing
+   of bullets already chosen). Inputs are the *pre-computed, approved*
+   fair-game keyword lists for that bullet (direct-claim vs
+   hedged-claim, per the tiers above) — the LLM never decides which
+   keywords are fair game, only how to phrase the ones it's handed.
+   System prompt constraints, enforced explicitly in the prompt text:
+   - May reword sentence structure to naturally surface the given
+     keywords.
+   - Must preserve every number/metric from the original bullet
+     verbatim (e.g. "1k RPS", "35%").
+   - Must not introduce any tool, action, or outcome not in the
+     original bullet or the approved keyword lists.
+   - Hedged-tier keywords must appear with hedging language; direct-tier
+     keywords may appear plainly.
+3. **Post-generation safety check** (code, not the LLM's word):
+   - Extract all numbers from the original bullet; confirm each appears
+     unchanged in the reworded version. Mismatch → reject, fall back to
+     the original deterministic bullet.
+   - Scan the reworded bullet against the full `KEYWORD_CANDIDATES` set;
+     any match not in that bullet's approved keyword list → reject,
+     fall back to the original.
+   - LLM call failure/timeout → same fallback, no blocking.
 
-Both are ordering/selection changes only — no new skill claims, no
-changes to what's truthful, `TRUTHFUL_SKILLS` gating untouched.
+This keeps content *selection* (what experience to show, in what order)
+fully deterministic and unchanged, while allowing *phrasing* to adapt
+per JD — bounded by a mechanical check that can't be talked around by
+the LLM, rather than trusting the prompt alone.
+
+### facts.md change
+
+New section, e.g. after "Skills inventory (honesty tiers)":
+
+```
+# Adjacent tool exposure (for JD-borderline claims)
+> Format: <real production/used skill> -> <adjacent tools fair to claim
+> "exposure to"/"familiarity with">. Only tools listed here as a target
+> are eligible for a hedged claim when they show up in a JD — anything
+> else not in facts.md at all stays out, no matter how JD-relevant.
+- Terraform -> Pulumi, Ansible, CloudFormation
+- Kubernetes (familiar) -> Helm, ArgoCD
+- Kafka (familiar) -> Pulsar
+[Mayur fills in the rest — this is a judgment call only he can make]
+```
+
+Mirrors `ADJACENCY_MAP` in `tailor_resume.py`, kept in sync manually —
+same existing pattern as `TRUTHFUL_SKILLS`/`KEYWORD_CANDIDATES` already
+being hand-transcribed from `facts.md` rather than parsed.
 
 ## Config
 
