@@ -224,6 +224,55 @@ def call_opencode(system_prompt, user_content, model=DEFAULT_OPENCODE_MODEL, tim
         log(f"WARN: OpenCode call failed: {e}")
         return None
 
+RULE_BASED_REJECT_THRESHOLD = 0.4
+
+def llm_judge(jd_text, resume_text, title, company):
+    """Judge how a busy recruiter (5-10 seconds per resume, 100+ resumes
+    to screen) would react to this resume against this JD: screen it
+    forward, or reject-risk. Always returns a usable result -- falls back
+    to a rule-based verdict (score_coverage threshold) on any LLM
+    failure, timeout, or malformed response, tagged via "source" so the
+    Telegram message can show which one produced it.
+    """
+    raw = call_opencode(
+        system_prompt=(
+            "You are a hiring manager screening resumes for a "
+            f"{title} role at {company}. You see 100+ resumes and spend "
+            "5-10 seconds on each. Given the job description and a "
+            "candidate's resume text, decide: would you screen this "
+            "resume forward for a closer look, or is it reject-risk? "
+            "Respond with ONLY valid JSON, no markdown fences, no "
+            "commentary, in this exact shape: "
+            '{"verdict": "screen"|"reject_risk", '
+            '"missing_keywords": ["keyword1", "keyword2"], '
+            '"reason": "one sentence explaining the verdict"}'
+        ),
+        user_content=f"JOB DESCRIPTION:\n{jd_text}\n\nRESUME:\n{resume_text}",
+    )
+
+    if raw:
+        try:
+            parsed = json.loads(raw.strip().strip("`").removeprefix("json").strip())
+            if parsed.get("verdict") in ("screen", "reject_risk") and isinstance(parsed.get("missing_keywords"), list):
+                return {
+                    "verdict": parsed["verdict"],
+                    "missing_keywords": parsed["missing_keywords"],
+                    "reason": str(parsed.get("reason", "")),
+                    "source": "llm",
+                }
+        except (json.JSONDecodeError, AttributeError):
+            log("WARN: llm_judge got malformed JSON from OpenCode, falling back to rule-based")
+
+    jd_keywords = extract_keywords(jd_text)
+    score, _covered, not_covered, not_truthful = score_coverage(jd_keywords, resume_text)
+    verdict = "reject_risk" if score < RULE_BASED_REJECT_THRESHOLD else "screen"
+    return {
+        "verdict": verdict,
+        "missing_keywords": not_covered + not_truthful,
+        "reason": f"Rule-based: {score:.2f} keyword coverage (LLM unavailable).",
+        "source": "rule_based",
+    }
+
 def extract_gh_job_id(url):
     m = re.search(r"gh_jid=(\d+)", url)
     if m:

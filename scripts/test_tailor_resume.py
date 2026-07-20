@@ -174,3 +174,41 @@ def test_fetch_jd_generic_skips_llm_when_scrape_is_already_usable(monkeypatch):
 
     result = tr.fetch_jd_generic("https://example.com/job/1")
     assert "PostgreSQL" in result["content_text"]
+
+
+def test_llm_judge_parses_valid_json_response(monkeypatch):
+    monkeypatch.setattr(
+        tr, "call_opencode",
+        lambda system_prompt, user_content, model=tr.DEFAULT_OPENCODE_MODEL, timeout=20:
+            '{"verdict": "screen", "missing_keywords": ["kubernetes"], "reason": "Strong backend match."}',
+    )
+    result = tr.llm_judge("JD text", "resume text", "Backend Engineer", "Acme")
+    assert result["verdict"] == "screen"
+    assert result["missing_keywords"] == ["kubernetes"]
+    assert result["reason"] == "Strong backend match."
+    assert result["source"] == "llm"
+
+
+def test_llm_judge_falls_back_to_rule_based_on_llm_failure(monkeypatch):
+    monkeypatch.setattr(
+        tr, "call_opencode",
+        lambda system_prompt, user_content, model=tr.DEFAULT_OPENCODE_MODEL, timeout=20: None,
+    )
+    result = tr.llm_judge(
+        "Requires Go, Terraform, Kubernetes, GraphQL, Rust.",
+        "Owned AWS infrastructure via Terraform for 5 services.",
+        "Backend Engineer", "Acme",
+    )
+    assert result["source"] == "rule_based"
+    assert result["verdict"] in ("screen", "reject_risk")
+    assert isinstance(result["missing_keywords"], list)
+
+
+def test_llm_judge_falls_back_to_rule_based_on_malformed_json(monkeypatch):
+    monkeypatch.setattr(
+        tr, "call_opencode",
+        lambda system_prompt, user_content, model=tr.DEFAULT_OPENCODE_MODEL, timeout=20:
+            "not valid json at all",
+    )
+    result = tr.llm_judge("JD text", "resume text", "Backend Engineer", "Acme")
+    assert result["source"] == "rule_based"
