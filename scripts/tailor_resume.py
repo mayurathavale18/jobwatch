@@ -126,7 +126,8 @@ def html_to_jd_text(raw_html):
     text = raw_html
     for tag in ("script", "style", "nav", "header", "footer"):
         text = re.sub(rf"<{tag}[^>]*>.*?</{tag}>", " ", text, flags=re.S | re.I)
-    text = re.sub(r"</(p|div|li|h[1-6]|br)\s*>", "\n", text, flags=re.I)
+    text = re.sub(r"</(p|div|li|h[1-6])\s*>", "\n", text, flags=re.I)
+    text = re.sub(r"<br\s*/?\s*>", "\n", text, flags=re.I)
     text = re.sub(r"<li[^>]*>", "\n- ", text, flags=re.I)
     text = re.sub(r"<[^>]+>", " ", text)
     text = html.unescape(text)

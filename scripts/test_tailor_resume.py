@@ -86,3 +86,10 @@ def test_fetch_jd_generic_parses_real_looking_page(monkeypatch):
     assert result is not None
     assert "Terraform" in result["content_text"]
     assert result["absolute_url"] == "https://valorem.keka.com/careers/jobdetails/124256"
+
+
+def test_html_to_jd_text_converts_br_tags_to_newlines():
+    html_input = "<p>First line.<br>Second line.<br/>Third line.<br />Fourth line.</p>"
+    text = tr.html_to_jd_text(html_input)
+    lines = [l.strip() for l in text.split("\n") if l.strip()]
+    assert lines == ["First line.", "Second line.", "Third line.", "Fourth line."]
