@@ -114,6 +114,57 @@ def fetch_greenhouse_job(company_slug, gh_job_id):
         log(f"WARN: Failed to fetch JD for {company_slug}/{gh_job_id}: {e}")
         return None
 
+def html_to_jd_text(raw_html):
+    """Strip a job posting page down to plausible JD body text: drop
+    script/style/nav/header/footer blocks entirely (boilerplate, never JD
+    content), convert block tags to newlines so paragraphs don't run
+    together, strip remaining tags, decode entities, collapse whitespace.
+    Lightweight and heuristic -- good enough for most static ATS pages,
+    not a real DOM parser. See fetch_jd_generic for the fallback when this
+    isn't enough (JS-rendered pages return almost nothing usable here).
+    """
+    text = raw_html
+    for tag in ("script", "style", "nav", "header", "footer"):
+        text = re.sub(rf"<{tag}[^>]*>.*?</{tag}>", " ", text, flags=re.S | re.I)
+    text = re.sub(r"</(p|div|li|h[1-6]|br)\s*>", "\n", text, flags=re.I)
+    text = re.sub(r"<li[^>]*>", "\n- ", text, flags=re.I)
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = html.unescape(text)
+    text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r"\n\s*\n+", "\n\n", text)
+    return text.strip()
+
+# Below this many characters of scraped text, fetch_jd_generic treats the
+# page as effectively empty (JS-rendered SPA shell, blocked fetch, etc)
+# and falls back to the OpenCode Go LLM extraction path (see Task 9).
+MIN_USABLE_JD_CHARS = 150
+
+def fetch_jd_generic(url):
+    """Fetch full JD text from an arbitrary (non-Greenhouse) job posting
+    URL via a plain HTML GET + tag-stripping. Returns the same dict shape
+    as fetch_greenhouse_job so callers don't need to branch on source.
+    Returns None only on a hard fetch failure (network error, non-200);
+    a thin/empty result is still returned so the caller (process_job, see
+    Task 15) can decide whether to fall back to an LLM extraction pass.
+    """
+    try:
+        req = Request(url, headers={"User-Agent": "jobwatch-resume-tailor/1.0"})
+        with urlopen(req, timeout=15) as resp:
+            raw_html = resp.read().decode("utf-8", errors="replace")
+    except Exception as e:
+        log(f"WARN: Failed to fetch JD page for {url}: {e}")
+        return None
+
+    text = html_to_jd_text(raw_html)
+    return {
+        "title": "",
+        "company_name": "",
+        "content_text": text,
+        "content_html": raw_html,
+        "location": "",
+        "absolute_url": url,
+    }
+
 def extract_gh_job_id(url):
     m = re.search(r"gh_jid=(\d+)", url)
     if m:
