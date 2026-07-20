@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"time"
 
+	"jobwatch/internal/jobsubmit"
 	"jobwatch/internal/store"
 )
 
@@ -21,6 +22,7 @@ type Server struct {
 	store   *store.Store
 	dist    fs.FS
 	logsDir string
+	pages   jobsubmit.PageFetcher
 }
 
 func NewServer(st *store.Store) (*Server, error) {
@@ -31,7 +33,7 @@ func NewServer(st *store.Store) (*Server, error) {
 	// Relative to the process's cwd, same convention as config.yaml's
 	// db_path -- both assume `jobwatch serve` runs from the repo root
 	// (which is how the dashboard-watchdog wrapper always starts it).
-	return &Server{store: st, dist: dist, logsDir: "logs"}, nil
+	return &Server{store: st, dist: dist, logsDir: "logs", pages: jobsubmit.HTTPPageFetcher{}}, nil
 }
 
 func (s *Server) Handler() http.Handler {

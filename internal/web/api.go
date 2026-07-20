@@ -247,7 +247,7 @@ func (s *Server) handleAPIJobsManual(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id, existed, company, title, err := jobsubmit.InsertManualJob(ctx, s.store, req.URL, jobsubmit.HTTPPageFetcher{})
+	id, existed, company, title, err := jobsubmit.InsertManualJob(ctx, s.store, req.URL, s.pages)
 	if err != nil {
 		httpError(w, "inserting manual job", err)
 		return

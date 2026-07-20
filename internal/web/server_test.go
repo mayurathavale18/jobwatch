@@ -13,6 +13,12 @@ import (
 	"jobwatch/internal/store"
 )
 
+type fakePages struct{}
+
+func (fakePages) FetchTitle(ctx context.Context, rawURL string) (string, error) {
+	return "Fake Title", nil
+}
+
 func newTestServer(t *testing.T) (*Server, *store.Store) {
 	t.Helper()
 	dir := t.TempDir()
@@ -26,6 +32,7 @@ func newTestServer(t *testing.T) (*Server, *store.Store) {
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
 	}
+	srv.pages = fakePages{}
 	return srv, st
 }
 
