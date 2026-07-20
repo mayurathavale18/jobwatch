@@ -37,6 +37,7 @@ func NewServer(st *store.Store) (*Server, error) {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/jobs", s.handleAPIJobs)
+	mux.HandleFunc("POST /api/jobs/manual", s.handleAPIJobsManual)
 	mux.HandleFunc("PATCH /api/jobs/{id}", s.handleAPIPatchJob)
 	mux.HandleFunc("GET /api/cron", s.handleAPICron)
 	mux.HandleFunc("POST /api/cron/{name}/run", s.handleAPICronRun)

@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"jobwatch/internal/store"
 )
 
 func TestHandleAPIJobsReturnsInsertedJob(t *testing.T) {
@@ -139,5 +141,84 @@ func TestHandleAPICronReturnsAllJobDefs(t *testing.T) {
 		if j.HasRun {
 			t.Errorf("job %s: HasRun = true in a fresh temp dir with no status files", j.Name)
 		}
+	}
+}
+
+func TestHandleAPIJobsManualInsertsAndTriggersOneOff(t *testing.T) {
+	srv, st := newTestServer(t)
+	// Same reason as TestHandleAPICronRunExecutesScript: NewServer's
+	// default logsDir ("logs") is relative to cwd, which is this
+	// package's directory under `go test`, not the repo root -- so the
+	// handler's log-file open would fail without a real dir to write to.
+	srv.logsDir = t.TempDir()
+
+	body := strings.NewReader(`{"url":"https://valorem.keka.com/careers/jobdetails/124256"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/jobs/manual", body)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202, body: %s", w.Code, w.Body.String())
+	}
+
+	var resp apiManualJobResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v\nbody: %s", err, w.Body.String())
+	}
+	if resp.AlreadyExisted {
+		t.Errorf("AlreadyExisted = true, want false for a fresh URL")
+	}
+	if resp.ID == 0 {
+		t.Errorf("ID = 0, want a nonzero job id")
+	}
+
+	rows, err := st.ListJobs(req.Context(), store.JobFilter{})
+	if err != nil {
+		t.Fatalf("ListJobs: %v", err)
+	}
+	if len(rows) != 1 || rows[0].Provider != "manual" {
+		t.Fatalf("rows = %+v, want one manual job inserted", rows)
+	}
+}
+
+func TestHandleAPIJobsManualRejectsMissingURL(t *testing.T) {
+	srv, _ := newTestServer(t)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/jobs/manual", strings.NewReader(`{}`))
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestHandleAPIJobsManualDuplicateReturns200(t *testing.T) {
+	srv, _ := newTestServer(t)
+	srv.logsDir = t.TempDir() // see comment in TestHandleAPIJobsManualInsertsAndTriggersOneOff
+	const jobURL = "https://valorem.keka.com/careers/jobdetails/124256"
+
+	post := func() *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/api/jobs/manual", strings.NewReader(`{"url":"`+jobURL+`"}`))
+		w := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(w, req)
+		return w
+	}
+
+	first := post()
+	if first.Code != http.StatusAccepted {
+		t.Fatalf("first submit status = %d, want 202", first.Code)
+	}
+
+	second := post()
+	if second.Code != http.StatusOK {
+		t.Fatalf("second submit status = %d, want 200 (already existed)", second.Code)
+	}
+	var resp apiManualJobResponse
+	if err := json.Unmarshal(second.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if !resp.AlreadyExisted {
+		t.Errorf("AlreadyExisted = false, want true on resubmit")
 	}
 }

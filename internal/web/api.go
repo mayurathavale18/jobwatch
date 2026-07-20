@@ -8,7 +8,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 
+	"jobwatch/internal/jobsubmit"
 	"jobwatch/internal/store"
 )
 
@@ -206,6 +208,84 @@ func (s *Server) handleAPICronRun(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusAccepted)
 	writeJSON(w, map[string]any{"triggered": true, "name": name})
+}
+
+type apiManualJobRequest struct {
+	URL string `json:"url"`
+}
+
+type apiManualJobResponse struct {
+	ID             int64  `json:"id"`
+	AlreadyExisted bool   `json:"alreadyExisted"`
+	Company        string `json:"company"`
+	Title          string `json:"title"`
+}
+
+// tailorOneScript is the wrapper spawned for a single freshly-submitted
+// job, relative to the process's cwd -- same convention as cronJobDefs'
+// Script paths (see cron.go), always run from the repo root.
+const tailorOneScript = "scripts/tailor-one.sh"
+
+// handleAPIJobsManual inserts a job from an arbitrary URL (dashboard's
+// "add job link" input) and spawns a detached one-off tailoring run for
+// it, so the tailored resume + verdict reaches Telegram in roughly
+// 10-30s instead of waiting for the next tailor-resume cron tick. Mirrors
+// handleAPICronRun's detached-exec pattern: the HTTP response doesn't
+// wait for tailoring to finish, since the result arrives via Telegram the
+// same way every other job notification already does.
+func (s *Server) handleAPIJobsManual(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	var req apiManualJobRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid json body", http.StatusBadRequest)
+		return
+	}
+	req.URL = strings.TrimSpace(req.URL)
+	if req.URL == "" || (!strings.HasPrefix(req.URL, "http://") && !strings.HasPrefix(req.URL, "https://")) {
+		http.Error(w, "url must be a non-empty http(s) URL", http.StatusBadRequest)
+		return
+	}
+
+	id, existed, company, title, err := jobsubmit.InsertManualJob(ctx, s.store, req.URL, jobsubmit.HTTPPageFetcher{})
+	if err != nil {
+		httpError(w, "inserting manual job", err)
+		return
+	}
+
+	resp := apiManualJobResponse{ID: id, AlreadyExisted: existed, Company: company, Title: title}
+
+	if existed {
+		w.WriteHeader(http.StatusOK)
+		writeJSON(w, resp)
+		return
+	}
+
+	logFile, err := os.OpenFile(filepath.Join(s.logsDir, "cron.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		httpError(w, "opening cron.log", err)
+		return
+	}
+
+	cmd := exec.Command("bash", tailorOneScript, strconv.FormatInt(id, 10))
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
+
+	if err := cmd.Start(); err != nil {
+		logFile.Close()
+		httpError(w, "starting tailor-one", err)
+		return
+	}
+
+	go func() {
+		defer logFile.Close()
+		if err := cmd.Wait(); err != nil {
+			slog.Error("tailor-one exited non-zero", "job_id", id, "error", err)
+		}
+	}()
+
+	w.WriteHeader(http.StatusAccepted)
+	writeJSON(w, resp)
 }
 
 func writeJSON(w http.ResponseWriter, v any) {
