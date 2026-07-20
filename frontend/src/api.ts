@@ -74,3 +74,20 @@ export async function triggerCronJob(name: string): Promise<void> {
   const res = await fetch(`/api/cron/${name}/run`, { method: 'POST' })
   if (!res.ok) throw new Error(`POST /api/cron/${name}/run: ${res.status}`)
 }
+
+export interface ManualJobResponse {
+  id: number
+  alreadyExisted: boolean
+  company: string
+  title: string
+}
+
+export async function submitManualJob(url: string): Promise<ManualJobResponse> {
+  const res = await fetch('/api/jobs/manual', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url }),
+  })
+  if (!res.ok) throw new Error(`POST /api/jobs/manual: ${res.status}`)
+  return res.json()
+}

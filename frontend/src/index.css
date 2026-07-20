@@ -45,6 +45,23 @@ h1 {
   padding: 0.3rem 0.4rem;
 }
 
+.add-job {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.add-job input[type='url'] {
+  flex: 1;
+  min-width: 240px;
+}
+
+.add-job-status {
+  font-size: 0.9em;
+  color: #888;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;

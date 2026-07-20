@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { fetchJobs, patchJob, type JobsResponse } from '../api'
+import { fetchJobs, patchJob, submitManualJob, type JobsResponse } from '../api'
 
 function filtersFromLocation(): { status: string; company: string; q: string } {
   const params = new URLSearchParams(window.location.search)
@@ -13,6 +13,33 @@ function filtersFromLocation(): { status: string; company: string; q: string } {
 export default function Jobs() {
   const [filters, setFilters] = useState(filtersFromLocation)
   const [data, setData] = useState<JobsResponse | null>(null)
+  const [manualUrl, setManualUrl] = useState('')
+  const [manualStatus, setManualStatus] = useState<string | null>(null)
+  const [manualSubmitting, setManualSubmitting] = useState(false)
+
+  // Typed as a minimal structural type (just the one method this handler
+  // needs) rather than importing React.FormEvent -- this file has no
+  // existing `import React` or `FormEvent` import to hang that off of,
+  // and pulling one in for a single event handler isn't worth it.
+  async function handleSubmitManualJob(e: { preventDefault: () => void }) {
+    e.preventDefault()
+    if (!manualUrl.trim()) return
+    setManualSubmitting(true)
+    setManualStatus(null)
+    try {
+      const result = await submitManualJob(manualUrl.trim())
+      setManualStatus(
+        result.alreadyExisted
+          ? `Already added — #J${result.id} (${result.company})`
+          : `Added #J${result.id} — ${result.company} — resume incoming on Telegram`,
+      )
+      setManualUrl('')
+    } catch (err) {
+      setManualStatus(`Failed to add: ${err instanceof Error ? err.message : String(err)}`)
+    } finally {
+      setManualSubmitting(false)
+    }
+  }
 
   useEffect(() => {
     const params = new URLSearchParams()
@@ -40,6 +67,20 @@ export default function Jobs() {
 
   return (
     <>
+      <form className="add-job" onSubmit={handleSubmitManualJob}>
+        <input
+          type="url"
+          placeholder="Paste a job posting URL (Keka, Workday, anywhere)..."
+          value={manualUrl}
+          onChange={(e) => setManualUrl(e.target.value)}
+          required
+        />
+        <button type="submit" disabled={manualSubmitting}>
+          {manualSubmitting ? 'Adding…' : 'Add & Tailor'}
+        </button>
+        {manualStatus && <span className="add-job-status">{manualStatus}</span>}
+      </form>
+
       <div className="stats">
         <span>
           Total: <span className="count">{data.totalJobs}</span>
