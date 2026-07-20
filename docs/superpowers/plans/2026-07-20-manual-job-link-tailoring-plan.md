@@ -15,7 +15,7 @@
 - `OPENCODE_API_KEY` sourced from `.env` (gitignored, already the pattern for `JOBWATCH_TG_TOKEN`/`JOBWATCH_TG_CHAT`) — never hardcoded, never committed.
 - Every new Go package/function gets a table-driven or scenario test in the same PR; every new Python function gets a `pytest` test in `scripts/test_tailor_resume.py` (new file — no Python tests exist yet in this repo).
 - `gofmt -l .` must stay empty; `go test ./...` must stay green after every task.
-- Resume content *selection* (which bullets, which focus) never changes in this plan — only JD-keyword-driven *ordering* and a bounded, mechanically-validated *phrasing* pass. Nothing here may cause a claim to appear that isn't backed by `facts.md`'s `TRUTHFUL_SKILLS`/`FAMILIAR_SKILLS`/`ADJACENCY_MAP` tiers defined in Task 6.
+- Resume content *selection* (which bullets, which focus) never changes in this plan — only JD-keyword-driven *ordering* and a bounded, mechanically-validated *phrasing* pass. Nothing here may cause a claim to appear that isn't backed by `facts.md`'s `TRUTHFUL_SKILLS`/`FAMILIAR_SKILLS`/`ADJACENT_SKILLS` tiers defined in Task 6.
 
 ---
 
@@ -818,61 +818,85 @@ git commit -m "Add 'Add job link' form to the dashboard Jobs page"
 - Modify: `resume/facts.md`
 - Modify: `scripts/tailor_resume.py` (only the `KEYWORD_CANDIDATES` and `CANONICAL_CASE` dicts — no logic yet, that's Task 6)
 
-This is pure data/content prep so Task 6's code has real sets to work with. `facts.md` already has an honesty-tier system (`production`/`used`/`familiar`) that the code doesn't fully use yet — this task extends both the doc and the keyword-candidate list to cover the new adjacency concept, without touching any scoring logic.
+This is pure data/content prep so Task 6's code has real sets to work with. `facts.md` already has an honesty-tier system (`production`/`used`/`familiar`) that the code doesn't fully use yet.
 
-- [ ] **Step 1: Add the Adjacent tool exposure section to `facts.md`**
-
-Insert after the "Skills inventory (honesty tiers)" section (after its last bullet, before "# Interview stories bank"):
+**Important:** Mayur has already hand-edited `resume/facts.md` with his own real adjacency list (uncommitted, currently sitting as a local modification — check with `git diff resume/facts.md` before touching this file). It reads:
 
 ```markdown
----
-
-# Adjacent tool exposure (for JD-borderline claims)
-> Format: <real production/used/familiar skill> -> <adjacent tools fair
-> to claim "exposure to"/"familiarity with" when a JD asks for them,
-> even though they're not separately used at Zotok>. Only tools listed
-> here as a target are eligible for a hedged claim when they show up in
-> a JD -- anything else not in this file at all stays out, no matter how
-> JD-relevant it looks. Edit this list yourself; it's a judgment call
-> only Mayur can make.
-- Terraform -> Pulumi, Ansible, CloudFormation
-- Kubernetes (familiar) -> Helm, ArgoCD
-- Kafka (familiar) -> Pulsar
+# Adjecent Skills ( soft hand on these skills )
+- Databases : cassandra
+- GCP : BigQuery
+- Automation : Ansible, Jenkins
+- AI/ML : PyTorch, TensorFlow, Scikit-learn
+- Languages: Java, Kotlin
+- Frameworks: Spring, Spring Boot
 ```
 
-- [ ] **Step 2: Add missing keyword candidates to `tailor_resume.py`**
+Do NOT insert the spec's example section (Terraform->Pulumi etc — that was illustrative only, written before this real content existed). Instead:
 
-In `KEYWORD_CANDIDATES` (the `# Infra / DevOps` group), add the adjacency targets that don't exist yet:
+- [ ] **Step 1: Fix the section header typo and commit Mayur's existing edit as-is**
+
+`git diff resume/facts.md` first to confirm the section is still there unchanged. Fix only the header typo ("Adjecent" -> "Adjacent"), leave every skill/category line exactly as Mayur wrote it — these are his judgment calls, not this task's content to invent or second-guess:
+
+```markdown
+# Adjacent Skills ( soft hand on these skills )
+- Databases : cassandra
+- GCP : BigQuery
+- Automation : Ansible, Jenkins
+- AI/ML : PyTorch, TensorFlow, Scikit-learn
+- Languages: Java, Kotlin
+- Frameworks: Spring, Spring Boot
+```
+
+(Also leave his other already-filled `[FILL: ...]` metrics edits in the same file untouched — this task only touches the Adjacent Skills header.)
+
+- [ ] **Step 2: Add matching keyword candidates to `tailor_resume.py`**
+
+The code needs to recognize these exact terms in a JD for the adjacency tier to ever trigger. Add to `KEYWORD_CANDIDATES`:
+
+In the `# Data / queues / search` group, add `"cassandra"`:
+
+```python
+    "redshift", "athena", "rabbitmq", "kafka", "cassandra",
+```
+
+In the `# Infra / DevOps` group, add `"bigquery"`, `"ansible"`, `"jenkins"`:
 
 ```python
     # Infra / DevOps
     "aws", "gcp", "azure", "terraform", "docker", "kubernetes", "k8s", "github actions", "ci/cd",
     "ecs", "ec2", "rds", "lambda", "secrets manager", "cloudwatch", "cloudfront", "route 53",
-    "vpc", "iam", "fargate", "pulumi", "ansible", "cloudformation", "helm", "argocd",
+    "vpc", "iam", "fargate", "bigquery", "ansible", "jenkins",
 ```
 
-In the `# Data / queues / search` group, add `"pulsar"`:
+Add a new `# AI / ML frameworks (adjacent)` entries to the existing `# AI / LLM` group: `"pytorch"`, `"tensorflow"`, `"scikit-learn"`:
 
 ```python
-    "redshift", "athena", "rabbitmq", "kafka", "pulsar",
+    "knn", "bm25", "hybrid retrieval", "pytorch", "tensorflow", "scikit-learn",
 ```
 
-In the `# Backend / frameworks` group, `"trpc"` already exists — confirm it's there (it is, per the existing file); no change needed there.
-
-Add `"firebase"` to the `# Data / queues / search` group too (currently absent, needed since it's one of `facts.md`'s `familiar`-tier data-layer items):
+Add `"kotlin"` to the `# Languages` group:
 
 ```python
-    "mongodb", "s3", "s3 tables", "spark", "sqs", "sns", "dynamodb streams", "eventbridge",
-    "redshift", "athena", "rabbitmq", "kafka", "pulsar", "firebase",
+    "go", "golang", "python", "typescript", "javascript", "java", "scala", "rust", "sql", "bash", "kotlin",
 ```
 
-Add casing entries to `CANONICAL_CASE` for every new keyword above that doesn't already have one (check each against the existing dict first — `kubernetes`, `k8s`, `gcp`, `rabbitmq` are currently absent from `CANONICAL_CASE`; `mongodb`, `langchain` already exist):
+Add `"spring"`, `"spring boot"` to the `# Backend / frameworks` group:
 
 ```python
-    "kubernetes": "Kubernetes", "k8s": "K8s", "gcp": "GCP", "rabbitmq": "RabbitMQ",
-    "pulumi": "Pulumi", "ansible": "Ansible", "cloudformation": "CloudFormation",
-    "helm": "Helm", "argocd": "ArgoCD", "pulsar": "Pulsar", "firebase": "Firebase",
-    "trpc": "tRPC",
+    "rest", "rest api", "rest apis", "microservices", "fastapi", "nestjs", "node.js", "nodejs",
+    "gin", "krakend", "api gateway", "api gateways", "temporal", "graphql", "hasura", "trpc",
+    "spring", "spring boot",
+```
+
+Add `"kubernetes"` and `"gcp"` if not already present as JD-detectable candidates (both already exist in the current `KEYWORD_CANDIDATES` — confirm, don't duplicate).
+
+Add casing entries to `CANONICAL_CASE` for every new term above that doesn't already have one (check each against the existing dict first — `gcp` may already exist):
+
+```python
+    "cassandra": "Cassandra", "bigquery": "BigQuery", "ansible": "Ansible", "jenkins": "Jenkins",
+    "pytorch": "PyTorch", "tensorflow": "TensorFlow", "scikit-learn": "Scikit-learn",
+    "kotlin": "Kotlin", "spring": "Spring", "spring boot": "Spring Boot",
 ```
 
 - [ ] **Step 3: Verify the file still parses / imports cleanly**
@@ -890,14 +914,14 @@ git commit -m "Add adjacent-tool-exposure tier to facts.md and new keyword candi
 
 ---
 
-## Task 6: Honesty-tier keyword classification (`ADJACENCY_MAP`, `FAMILIAR_SKILLS`, 3-bucket coverage)
+## Task 6: Honesty-tier keyword classification (`ADJACENT_SKILLS`, `FAMILIAR_SKILLS`, 3-bucket coverage)
 
 **Files:**
 - Modify: `scripts/tailor_resume.py`
 - Create: `scripts/test_tailor_resume.py`
 
 **Interfaces:**
-- Produces: `FAMILIAR_SKILLS: set[str]`, `ADJACENCY_MAP: dict[str, str]` (adjacent-tool-keyword -> its anchor production skill), `classify_keyword(kw: str) -> str` (returns `"direct"`, `"hedged_familiar"`, `"hedged_adjacent"`, or `"fabrication_risk"`), `score_coverage_tiered(keywords: list[str], resume_text: str) -> dict` (returns `{"score": float, "direct": [...], "hedged": [...], "missing": [...]}`).
+- Produces: `FAMILIAR_SKILLS: set[str]`, `ADJACENT_SKILLS: set[str]` (Mayur's curated "soft hand" tools from `facts.md`'s "Adjacent Skills" section — a flat set, not anchor-mapped, matching how he actually wrote that section as category-grouped lists rather than 1:1 pairs), `classify_keyword(kw: str) -> str` (returns `"direct"`, `"hedged_familiar"`, `"hedged_adjacent"`, or `"fabrication_risk"`), `score_coverage_tiered(keywords: list[str], resume_text: str) -> dict` (returns `{"score": float, "direct": [...], "hedged": [...], "missing": [...]}`).
 - Consumes: `TRUTHFUL_SKILLS`, `KEYWORD_CANDIDATES`, `keyword_in_text` (all existing).
 
 This is the code counterpart to Task 5's `facts.md` additions — existing `score_coverage`/`TRUTHFUL_SKILLS` stay untouched (still used as-is elsewhere), this adds the new tiered classification alongside them.
@@ -922,10 +946,11 @@ def test_classify_keyword_hedged_familiar_for_kafka():
     assert tr.classify_keyword("kafka") == "hedged_familiar"
 
 
-def test_classify_keyword_hedged_adjacent_for_pulumi():
-    # Pulumi isn't in facts.md at all, but is adjacent to Terraform (a
-    # real production skill) per ADJACENCY_MAP.
-    assert tr.classify_keyword("pulumi") == "hedged_adjacent"
+def test_classify_keyword_hedged_adjacent_for_cassandra():
+    # Cassandra is one of Mayur's curated "Adjacent Skills" in facts.md
+    # (Databases : cassandra) -- not in facts.md's production/used/familiar
+    # tiers at all, but a fair hedged claim per his own judgment call.
+    assert tr.classify_keyword("cassandra") == "hedged_adjacent"
 
 
 def test_classify_keyword_fabrication_risk_for_unrelated_tool():
@@ -933,13 +958,13 @@ def test_classify_keyword_fabrication_risk_for_unrelated_tool():
 
 
 def test_score_coverage_tiered_buckets_keywords_correctly():
-    keywords = ["terraform", "kafka", "pulumi", "salesforce"]
+    keywords = ["terraform", "kafka", "cassandra", "salesforce"]
     resume_text = "Owned AWS infrastructure via Terraform for 5 services."
     result = tr.score_coverage_tiered(keywords, resume_text)
 
     assert "terraform" in result["direct"]
     assert "kafka" not in result["direct"] and "kafka" not in result["hedged"]
-    assert "pulumi" not in result["hedged"]  # not present in resume_text yet
+    assert "cassandra" not in result["hedged"]  # not present in resume_text yet
     assert "salesforce" in result["missing"]
     assert result["score"] == 0.25  # only "terraform" actually appears in the text
 
@@ -971,30 +996,29 @@ FAMILIAR_SKILLS = {
     "trpc", "firebase",
 }
 
-# Adjacent-tool-keyword -> its real production-tier anchor skill. A JD
-# keyword found here isn't itself in facts.md at all, but is close enough
-# to a real production skill that a hedged "exposure to" claim is fair --
-# see facts.md's "Adjacent tool exposure" section, which this must be kept
-# in sync with (same manual-sync pattern as TRUTHFUL_SKILLS itself).
-ADJACENCY_MAP = {
-    "pulumi": "terraform", "ansible": "terraform", "cloudformation": "terraform",
-    "helm": "kubernetes", "argocd": "kubernetes",
-    "pulsar": "kafka",
+# Mayur's curated "soft hand" tools -- see facts.md's "Adjacent Skills"
+# section, which this must be kept in sync with (same manual-sync pattern
+# as TRUTHFUL_SKILLS itself). Not in facts.md's production/used/familiar
+# tiers at all, but a fair hedged "exposure to" claim per his own judgment.
+ADJACENT_SKILLS = {
+    "cassandra", "bigquery", "ansible", "jenkins",
+    "pytorch", "tensorflow", "scikit-learn",
+    "kotlin", "spring", "spring boot",
 }
 
 def classify_keyword(kw):
     """Classify a JD keyword into one of four honesty tiers for resume
     claims: "direct" (facts.md production/used tier, claim plainly),
     "hedged_familiar" (facts.md familiar tier, claim only with hedge
-    language), "hedged_adjacent" (not in facts.md, but adjacent to a real
-    production skill per ADJACENCY_MAP, claim only with hedge language),
-    or "fabrication_risk" (nothing related at all -- never claimed).
+    language), "hedged_adjacent" (Mayur's curated ADJACENT_SKILLS, claim
+    only with hedge language), or "fabrication_risk" (nothing related at
+    all -- never claimed).
     """
     if kw in TRUTHFUL_SKILLS:
         return "direct"
     if kw in FAMILIAR_SKILLS:
         return "hedged_familiar"
-    if kw in ADJACENCY_MAP:
+    if kw in ADJACENT_SKILLS:
         return "hedged_adjacent"
     return "fabrication_risk"
 
@@ -1713,9 +1737,9 @@ def inject_keyword_emphasis(bullets, skills_section, jd_keywords):
 
     Direct-tier gaps (facts.md production/used skills missing from the
     fixed bullet text) get folded in plainly, same as before. Hedged-tier
-    gaps (facts.md familiar tier, or adjacent to a real production skill
-    per ADJACENCY_MAP) get folded in too, but only with explicit hedging
-    language -- never phrased as hands-on. Fabrication-risk keywords
+    gaps (facts.md familiar tier, or Mayur's curated ADJACENT_SKILLS) get
+    folded in too, but only with explicit hedging language -- never
+    phrased as hands-on. Fabrication-risk keywords
     (score_coverage_tiered's "missing" bucket that isn't hedge-eligible)
     are never touched here.
     """
