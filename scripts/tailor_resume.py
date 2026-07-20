@@ -710,6 +710,78 @@ def inject_keyword_emphasis(bullets, skills_section, jd_keywords):
 
     return bullets, extra_skills_line
 
+NUMBER_RE = re.compile(r"\d+(?:\.\d+)?%?")
+
+def reword_is_safe(original, reworded, approved_keywords):
+    """Mechanically validate an LLM-reworded bullet before it's ever used:
+    every number/percentage in the original must appear unchanged in the
+    reworded version, and no KEYWORD_CANDIDATES term may appear in the
+    reworded version unless it was already in the original OR is in
+    approved_keywords. This is a code check, not the LLM's word -- the
+    LLM cannot talk its way past it.
+    """
+    original_numbers = set(NUMBER_RE.findall(original))
+    reworded_numbers = set(NUMBER_RE.findall(reworded))
+    if not original_numbers.issubset(reworded_numbers):
+        return False
+
+    approved = {kw.lower() for kw in approved_keywords}
+    original_lower = original.lower()
+    for candidate in KEYWORD_CANDIDATES:
+        if keyword_in_text(candidate, reworded) and not keyword_in_text(candidate, original_lower):
+            if candidate not in approved:
+                return False
+
+    # Balanced \textbf{...} braces -- an unbalanced brace would break the
+    # LaTeX compile downstream.
+    if reworded.count("{") != reworded.count("}"):
+        return False
+
+    return True
+
+def llm_reword_bullet(bullet_text, direct_keywords, hedged_keywords):
+    """Reword one already-selected bullet's phrasing to naturally surface
+    the given pre-approved keywords -- selection is untouched (this never
+    picks which keywords are fair game, only how to phrase the ones it's
+    handed). Falls back to the original bullet unchanged on any LLM
+    failure or safety-check rejection (see reword_is_safe): a phrasing
+    task, never a content-invention task.
+    """
+    approved = direct_keywords + hedged_keywords
+    if not approved:
+        return bullet_text
+
+    direct_list = ", ".join(canonical_case(k) for k in direct_keywords) or "none"
+    hedged_list = ", ".join(canonical_case(k) for k in hedged_keywords) or "none"
+
+    reworded = call_opencode(
+        system_prompt=(
+            "You reword a single resume bullet point to naturally surface "
+            "specific keywords for a job application, for a recruiter "
+            "scanning resumes in 5-10 seconds. Rules, all mandatory: "
+            "(1) Preserve every number and percentage from the original "
+            "bullet exactly. "
+            "(2) Do not invent any new action, tool, metric, or outcome "
+            "not already in the original bullet. "
+            f"(3) You may plainly state these keywords if relevant: {direct_list}. "
+            f"(4) These keywords may ONLY appear with hedging language like "
+            f"'exposure to' or 'working knowledge of', never as if hands-on: {hedged_list}. "
+            "(5) Preserve any LaTeX \\textbf{...} markup structure (balanced braces). "
+            "(6) Return ONLY the reworded bullet text, no commentary, no quotes."
+        ),
+        user_content=bullet_text,
+    )
+
+    if not reworded:
+        return bullet_text
+
+    reworded = reworded.strip().strip('"')
+    if not reword_is_safe(bullet_text, reworded, approved):
+        log("WARN: llm_reword_bullet output failed safety check, falling back to original")
+        return bullet_text
+
+    return reworded
+
 def build_projects_section(focus, jd_keywords):
     """Build the Projects & Writing section."""
     projects = [

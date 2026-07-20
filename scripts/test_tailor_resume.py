@@ -252,3 +252,53 @@ def test_inject_keyword_emphasis_never_touches_fabrication_risk_keyword():
     new_bullets, extra_line = tr.inject_keyword_emphasis(bullets, skills_section, jd_keywords)
     combined = new_bullets[0] + (extra_line or "")
     assert "Salesforce" not in combined and "salesforce" not in combined
+
+
+def test_reword_is_safe_rejects_changed_numbers():
+    original = "Handled 1k RPS with 250ms P99 latency."
+    reworded = "Handled 5k RPS with 250ms P99 latency."  # number changed: 1k -> 5k
+    assert tr.reword_is_safe(original, reworded, approved_keywords=[]) is False
+
+
+def test_reword_is_safe_rejects_unapproved_keyword():
+    original = "Built a backend service using Go."
+    reworded = "Built a backend service using Go and Kubernetes."  # kubernetes not approved
+    assert tr.reword_is_safe(original, reworded, approved_keywords=["go"]) is False
+
+
+def test_reword_is_safe_accepts_valid_rewording():
+    original = "Built and owned a Go-based API gateway routing traffic across 12 microservices."
+    reworded = "Owned a production Go API gateway, routing traffic across 12 microservices."
+    assert tr.reword_is_safe(original, reworded, approved_keywords=["go", "microservices"]) is True
+
+
+def test_llm_reword_bullet_uses_llm_output_when_safe(monkeypatch):
+    original = "Built and owned a Go-based API gateway routing traffic across 12 microservices."
+    monkeypatch.setattr(
+        tr, "call_opencode",
+        lambda system_prompt, user_content, model=tr.DEFAULT_OPENCODE_MODEL, timeout=20:
+            "Owned a Go API gateway routing traffic across 12 microservices, with RESTful design throughout.",
+    )
+    result = tr.llm_reword_bullet(original, direct_keywords=["go", "rest"], hedged_keywords=[])
+    assert "RESTful" in result or "REST" in result
+
+
+def test_llm_reword_bullet_falls_back_to_original_on_unsafe_output(monkeypatch):
+    original = "Built and owned a Go-based API gateway routing traffic across 12 microservices."
+    monkeypatch.setattr(
+        tr, "call_opencode",
+        lambda system_prompt, user_content, model=tr.DEFAULT_OPENCODE_MODEL, timeout=20:
+            "Built and owned a Kubernetes-based API gateway routing traffic across 50 microservices.",
+    )
+    result = tr.llm_reword_bullet(original, direct_keywords=["go"], hedged_keywords=[])
+    assert result == original  # unsafe (unapproved keyword + changed number) -> unchanged
+
+
+def test_llm_reword_bullet_falls_back_to_original_on_llm_failure(monkeypatch):
+    original = "Built and owned a Go-based API gateway."
+    monkeypatch.setattr(
+        tr, "call_opencode",
+        lambda system_prompt, user_content, model=tr.DEFAULT_OPENCODE_MODEL, timeout=20: None,
+    )
+    result = tr.llm_reword_bullet(original, direct_keywords=["go"], hedged_keywords=[])
+    assert result == original
