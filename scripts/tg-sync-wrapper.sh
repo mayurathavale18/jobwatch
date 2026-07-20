@@ -27,19 +27,19 @@ if [ -f "$ROOT_DIR/.env" ]; then
   set +a
 fi
 
-# Prevent concurrent runs
-if [ -f "$LOCK_FILE" ]; then
-  LOCK_PID=$(cat "$LOCK_FILE" 2>/dev/null)
-  if kill -0 "$LOCK_PID" 2>/dev/null; then
-    echo "TG_SYNC_SKIP: previous run (PID $LOCK_PID) still active"
-    write_status "tg-sync" "SKIP" "previous run (PID $LOCK_PID) still active"
-    exit 0
-  else
-    rm -f "$LOCK_FILE"
-  fi
+# Prevent concurrent runs. flock on an open fd is a single atomic syscall --
+# the previous check-then-write PID-file pattern here had a TOCTOU race: two
+# invocations starting close together (scheduled cron overlapping a
+# dashboard "Run now" click, or a double-click) could both pass the check
+# before either wrote the file, and run concurrently. Both would then fetch
+# the *same* batch of pending Telegram updates (offset only advances once,
+# at the end of a run) and process them twice.
+exec 200>"$LOCK_FILE"
+if ! flock -n 200; then
+  echo "TG_SYNC_SKIP: another run already holds the lock"
+  write_status "tg-sync" "SKIP" "another run already holds the lock"
+  exit 0
 fi
-echo $$ > "$LOCK_FILE"
-trap 'rm -f "$LOCK_FILE"' EXIT
 
 LOG_FILE="$LOG_DIR/tg-sync-$(date +%Y%m%d).log"
 STDERR_FILE=$(mktemp)

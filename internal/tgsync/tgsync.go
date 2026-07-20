@@ -218,6 +218,13 @@ func (s *Syncer) processUpdate(ctx context.Context, upd notify.Update) (bool, er
 
 	job, err := s.Store.GetJobTx(ctx, tx, jobID)
 	if err == sql.ErrNoRows {
+		// Logged at Warn (not just sent back to Telegram) so a recurrence is
+		// actually diagnosable -- update_id/message_id/replied-to text
+		// pin down exactly which message triggered it, unlike the plain
+		// Telegram reply alone.
+		slog.Warn("tg-sync: job not found for reply",
+			"update_id", upd.UpdateID, "message_id", msg.MessageID, "job_id", jobID,
+			"reply_text", msg.Text, "replied_to_text", repliedText)
 		return false, s.TG.Reply(ctx, msg.MessageID, fmt.Sprintf("Job #J%d not found.", jobID))
 	}
 	if err != nil {

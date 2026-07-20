@@ -36,19 +36,16 @@ fi
 # silence gave it away).
 export PATH="$ROOT_DIR:$PATH"
 
-# Prevent concurrent runs
-if [ -f "$LOCK_FILE" ]; then
-  LOCK_PID=$(cat "$LOCK_FILE" 2>/dev/null)
-  if kill -0 "$LOCK_PID" 2>/dev/null; then
-    echo "TAILOR_SKIP: previous run (PID $LOCK_PID) still active"
-    write_status "tailor-resume" "SKIP" "previous run (PID $LOCK_PID) still active"
-    exit 0
-  else
-    rm -f "$LOCK_FILE"
-  fi
+# Prevent concurrent runs. flock on an open fd is atomic -- see
+# tg-sync-wrapper.sh's comment for why the old check-then-write PID-file
+# pattern here was racy (a scheduled cron tick overlapping a dashboard
+# "Run now" click could slip past it and run concurrently).
+exec 200>"$LOCK_FILE"
+if ! flock -n 200; then
+  echo "TAILOR_SKIP: another run already holds the lock"
+  write_status "tailor-resume" "SKIP" "another run already holds the lock"
+  exit 0
 fi
-echo $$ > "$LOCK_FILE"
-trap 'rm -f "$LOCK_FILE"' EXIT
 
 LOG_FILE="$LOG_DIR/tailor-resume-$(date +%Y%m%d).log"
 STDERR_FILE=$(mktemp)
