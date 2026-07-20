@@ -722,6 +722,8 @@ def _significant_words(text):
         "to", "of", "in", "on", "at", "by", "as", "is", "was", "were", "be",
         "this", "that", "these", "those", "it", "its", "into",
     }
+    text = re.sub(r"\\[a-zA-Z]+\{", " ", text)  # strip LaTeX command openers (\textbf{, \texttt{, etc)
+    text = text.replace("}", " ")  # strip closing braces
     words = re.findall(r"[a-z0-9]+", text.lower())
     return {w for w in words if w not in stopwords and len(w) > 2}
 

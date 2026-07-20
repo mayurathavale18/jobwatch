@@ -318,3 +318,9 @@ def test_llm_reword_bullet_falls_back_to_original_on_empty_after_strip(monkeypat
     )
     result = tr.llm_reword_bullet(original, direct_keywords=["go"], hedged_keywords=[])
     assert result == original
+
+
+def test_significant_words_strips_latex_markup():
+    words = tr._significant_words("Built a \\textbf{Go-based API gateway} routing traffic.")
+    assert "textbf" not in words
+    assert "based" in words or "gateway" in words
