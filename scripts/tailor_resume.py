@@ -215,6 +215,7 @@ def call_opencode(system_prompt, user_content, model=DEFAULT_OPENCODE_MODEL, tim
             headers={
                 "Authorization": f"Bearer {OPENCODE_API_KEY}",
                 "Content-Type": "application/json",
+                "User-Agent": "jobwatch-resume-tailor/1.0",
             },
         )
         with urlopen(req, timeout=timeout) as resp:
