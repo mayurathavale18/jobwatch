@@ -212,3 +212,21 @@ def test_llm_judge_falls_back_to_rule_based_on_malformed_json(monkeypatch):
     )
     result = tr.llm_judge("JD text", "resume text", "Backend Engineer", "Acme")
     assert result["source"] == "rule_based"
+
+
+def test_build_skills_section_lists_jd_matched_keyword_first():
+    # Languages is authored as "Go, Python, TypeScript, JavaScript, SQL, Bash" --
+    # Python is not first as-authored, so a JD keyword of "python" reordering
+    # it to the front proves the JD-match reordering actually happened.
+    section_with_match, _ = tr.build_skills_section(["backend"], ["python"])
+    section_without_match, _ = tr.build_skills_section(["backend"], [])
+
+    def first_language_in_line(section):
+        for line in section.split("\n"):
+            if line.startswith("\\techSkill{Languages}"):
+                items = line.split("{")[-1].rstrip("}").split(", ")
+                return items[0]
+        return None
+
+    assert first_language_in_line(section_without_match) == "Go"
+    assert first_language_in_line(section_with_match) == "Python"

@@ -531,6 +531,17 @@ def determine_focus(jd_text, title):
         focus.append("backend")
     return focus
 
+def _jd_first_order(skills_str, jd_keywords):
+    """Reorder a category's comma-separated skill string so JD-matched
+    items come first, preserving relative order within each group
+    otherwise -- a keyword-forward ordering for a recruiter's 5-10 second
+    scan, not a random shuffle."""
+    skills = [s.strip() for s in skills_str.split(",")]
+    matched = [s for s in skills if any(keyword_in_text(kw, s) for kw in jd_keywords)]
+    unmatched = [s for s in skills if s not in matched]
+    return ", ".join(matched + unmatched)
+
+
 def build_skills_section(focus, jd_keywords):
     """Build the Technical Skills section, reordered by relevance."""
     # Base categories. Sub-technologies are flattened into the top-level
@@ -577,7 +588,7 @@ def build_skills_section(focus, jd_keywords):
     # Limit to 6 categories if we need to save space (handled by caller via tight flag)
     lines = []
     for cat in order:
-        lines.append(f"\\techSkill{{{cat}}}{{{categories[cat]}}}")
+        lines.append(f"\\techSkill{{{cat}}}{{{_jd_first_order(categories[cat], jd_keywords)}}}")
     return "\n".join(lines), order
 
 def build_experience_bullets(focus, jd_keywords, tight=False):
