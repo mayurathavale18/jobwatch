@@ -8,6 +8,8 @@
 .poll_failcount
 .tg-sync-failures
 .tailor-resume-failures
+.tg-sync.lock
+.tailor-resume.lock
 /logs/
 /backups/
 resume/tailored.json
