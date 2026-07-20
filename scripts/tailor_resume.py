@@ -149,11 +149,13 @@ MIN_USABLE_JD_CHARS = 150
 
 def fetch_jd_generic(url):
     """Fetch full JD text from an arbitrary (non-Greenhouse) job posting
-    URL via a plain HTML GET + tag-stripping. Returns the same dict shape
-    as fetch_greenhouse_job so callers don't need to branch on source.
-    Returns None only on a hard fetch failure (network error, non-200);
-    a thin/empty result is still returned so the caller (process_job, see
-    Task 15) can decide whether to fall back to an LLM extraction pass.
+    URL. Tries a free HTML scrape first; if that yields too little usable
+    text (JS-rendered SPA shell, blocked fetch, etc), falls back to one
+    OpenCode Go call asking it to extract the JD text from the raw HTML.
+    Returns the same dict shape as fetch_greenhouse_job. Returns None only
+    on a hard fetch failure -- a thin/empty result after both attempts
+    still returns a dict (with whatever text was found), so the caller
+    can flag "JD text unavailable" rather than treat it as a fetch error.
     """
     try:
         req = Request(url, headers={"User-Agent": "jobwatch-resume-tailor/1.0"})
@@ -164,6 +166,21 @@ def fetch_jd_generic(url):
         return None
 
     text = html_to_jd_text(raw_html)
+
+    if len(text) < MIN_USABLE_JD_CHARS:
+        log(f"JD scrape too thin ({len(text)} chars) for {url}; trying OpenCode extraction")
+        llm_text = call_opencode(
+            system_prompt=(
+                "You extract job description text from raw HTML. Return ONLY the "
+                "job description body text (responsibilities, requirements, "
+                "qualifications) as plain text, no HTML, no commentary. If the HTML "
+                "genuinely contains no job description content, return an empty string."
+            ),
+            user_content=raw_html[:20000],
+        )
+        if llm_text and len(llm_text.strip()) >= MIN_USABLE_JD_CHARS:
+            text = llm_text.strip()
+
     return {
         "title": "",
         "company_name": "",

@@ -125,3 +125,52 @@ def test_call_opencode_returns_none_on_http_error(monkeypatch):
         raise OSError("timed out")
     monkeypatch.setattr(tr, "urlopen", raise_error)
     assert tr.call_opencode("system", "user") is None
+
+
+def test_fetch_jd_generic_falls_back_to_llm_when_scrape_thin(monkeypatch):
+    # Simulate a JS-rendered SPA shell: almost no text in the raw HTML.
+    thin_html = b"<html><body><div id='root'></div><script src='app.js'></script></body></html>"
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            return False
+        def read(self):
+            return thin_html
+
+    monkeypatch.setattr(tr, "urlopen", lambda req, timeout=15: FakeResponse())
+    monkeypatch.setattr(tr, "OPENCODE_API_KEY", "fake-key")
+    monkeypatch.setattr(
+        tr, "call_opencode",
+        lambda system_prompt, user_content, model=tr.DEFAULT_OPENCODE_MODEL, timeout=20:
+            "Backend Engineer role requiring Go, Terraform, and distributed systems experience. We need someone with strong backend skills. This role involves working with cloud infrastructure and managing complex systems. PostgreSQL and Redis are key technologies for this position. You should have proven experience with microservices.",
+    )
+
+    result = tr.fetch_jd_generic("https://valorem.keka.com/careers/jobdetails/124256")
+    assert result is not None
+    assert "Terraform" in result["content_text"]
+
+
+def test_fetch_jd_generic_skips_llm_when_scrape_is_already_usable(monkeypatch):
+    good_html = (
+        b"<html><body><main><h1>Backend Engineer</h1>"
+        b"<p>" + b"Requires Go and PostgreSQL experience. " * 10 + b"</p></main></body></html>"
+    )
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            return False
+        def read(self):
+            return good_html
+
+    monkeypatch.setattr(tr, "urlopen", lambda req, timeout=15: FakeResponse())
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("call_opencode should not be called when the scrape is already usable")
+    monkeypatch.setattr(tr, "call_opencode", fail_if_called)
+
+    result = tr.fetch_jd_generic("https://example.com/job/1")
+    assert "PostgreSQL" in result["content_text"]
