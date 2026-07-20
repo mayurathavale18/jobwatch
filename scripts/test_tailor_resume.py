@@ -254,6 +254,29 @@ def test_inject_keyword_emphasis_never_touches_fabrication_risk_keyword():
     assert "Salesforce" not in combined and "salesforce" not in combined
 
 
+def test_inject_keyword_emphasis_overflow_hedged_keywords_stay_hedged():
+    # More than MAX_INJECTED_KEYWORDS (3) hedged-tier gaps -- the overflow
+    # must NOT land in the plain "Additional Relevant Skills" line unhedged.
+    bullets = ["Built a backend service using Go and PostgreSQL."]
+    skills_section = "\\techSkill{Languages}{Go, Python}"
+    # kafka, rabbitmq, gcp, firebase are all hedged_familiar; cassandra, bigquery are hedged_adjacent
+    jd_keywords = ["kafka", "rabbitmq", "gcp", "firebase", "cassandra", "bigquery"]
+
+    new_bullets, extra_line = tr.inject_keyword_emphasis(bullets, skills_section, jd_keywords)
+    combined = new_bullets[0] + (extra_line or "")
+    assert "Additional Relevant Skills" not in combined or "Additional Exposure" in combined
+    # Nothing from the hedged set should appear as a bare claim outside hedge context
+    assert "\\techSkill{Additional Exposure}" in (extra_line or "")
+
+
+def test_classify_keyword_kubernetes_langchain_mongodb_trpc_not_familiar():
+    # These are already plainly claimed in the base skills grid, so they
+    # must NOT be in the hedged_familiar tier (that would contradict the
+    # resume's own direct claim of them).
+    for kw in ("kubernetes", "k8s", "langchain", "mongodb", "trpc"):
+        assert tr.classify_keyword(kw) != "hedged_familiar", f"{kw} should not be hedged_familiar"
+
+
 def test_reword_is_safe_rejects_changed_numbers():
     original = "Handled 1k RPS with 250ms P99 latency."
     reworded = "Handled 5k RPS with 250ms P99 latency."  # number changed: 1k -> 5k

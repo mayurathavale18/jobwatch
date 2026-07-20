@@ -378,8 +378,7 @@ TRUTHFUL_SKILLS = {
 # hedging language ("exposure to", "familiarity with") -- never phrased as
 # if hands-on. See facts.md's "Skills inventory (honesty tiers)" section.
 FAMILIAR_SKILLS = {
-    "kafka", "kubernetes", "k8s", "gcp", "langchain", "mongodb", "rabbitmq",
-    "trpc", "firebase",
+    "kafka", "gcp", "rabbitmq", "firebase",
 }
 
 # Mayur's curated "soft hand" tools -- see facts.md's "Adjacent Skills"
@@ -703,11 +702,14 @@ def inject_keyword_emphasis(bullets, skills_section, jd_keywords):
         hedged_list = ", ".join(canonical_case(kw) for kw in inject_hedged)
         bullets[0] = bullets[0].rstrip() + f" Has working exposure to {hedged_list} for adjacent needs."
 
-    extra_skills_line = None
-    remaining = remaining_direct + remaining_hedged
-    if remaining:
-        plain = ", ".join(canonical_case(kw) for kw in remaining)
-        extra_skills_line = f"\\techSkill{{Additional Relevant Skills}}{{{plain}}}"
+    extra_lines = []
+    if remaining_direct:
+        plain = ", ".join(canonical_case(kw) for kw in remaining_direct)
+        extra_lines.append(f"\\techSkill{{Additional Relevant Skills}}{{{plain}}}")
+    if remaining_hedged:
+        hedged_plain = ", ".join(canonical_case(kw) for kw in remaining_hedged)
+        extra_lines.append(f"\\techSkill{{Additional Exposure}}{{{hedged_plain}}}")
+    extra_skills_line = "\n".join(extra_lines) if extra_lines else None
 
     return bullets, extra_skills_line
 
