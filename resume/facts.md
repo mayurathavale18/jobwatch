@@ -28,8 +28,8 @@
 - Google Sheets and Tally connectors including auth flows.
 **Metrics:**
 - Drove 200%+ increase in daily sales leads (existing verified claim).
-- [FILL: number of tenants/clients live on copilot?]
-- [FILL: daily active conversations or messages handled?]
+- 5k + live DAUs on copilot product.
+- 100k+ live conversations handled on copilot product every day.
 **Stories:**
 - [FILL: one production incident on copilot — what broke, how you debugged, what changed after?]
 - [FILL: one architecture decision you made and the alternative you rejected, e.g. why LangGraph, why hybrid retrieval?]
@@ -39,9 +39,9 @@
 **What it does:** Extracts user messages from S3 Tables on scheduled windows, groups messages → threads → query_types, embeds key fields, stores embeddings + full message/thread data in OpenSearch. Backbone for copilot's search_threads and search_messages tools.
 **My role:** Built the pipeline end-to-end.
 **Metrics:**
-- [FILL: messages/day or per window processed?]
-- [FILL: index size / doc count, even rough?]
-- [FILL: pipeline latency or window size, e.g. "runs every X min over Y messages"?]
+- 10k+ messages per 20min time window
+- 10M+ index size / doc count
+- 1-2s pipeline latency per window.
 **Stories:**
 - [FILL: hardest data-quality or scale problem here — dedup? grouping accuracy? spark tuning?]
 
@@ -50,8 +50,8 @@
 **What it does:** Scheduled agents pick last-X-minutes of messages from clients' WhatsApp groups (via WAHA), search OpenSearch, extract data per a guidance prompt into connected Google Sheets.
 **My role:** Built agents and schedules; migrated the temporal service from Python to TypeScript.
 **Metrics:**
-- [FILL: number of WhatsApp groups / clients monitored?]
-- [FILL: runs per day? extraction accuracy feedback if any?]
+- 20+ WhatsApp groups / clients monitored
+- 72 runs per day, processing 1000+ messages per tennant group.
 **Stories:**
 - [FILL: why migrate temporal service to TypeScript — what drove the decision?]
 
@@ -151,6 +151,14 @@
 - used: LangChain [FILL: confirm — LangGraph yes, but LangChain itself?]
 
 ---
+
+# Adjacent Skills ( soft hand on these skills )
+- Databases : cassandra
+- GCP : BigQuery
+- Automation : Ansible, Jenkins
+- AI/ML : PyTorch, TensorFlow, Scikit-learn
+- Languages: Java, Kotlin
+- Frameworks: Spring, Spring Boot
 
 # Interview stories bank (fill over time, one paragraph each)
 - [FILL: production incident story — detection, debugging, fix, prevention]

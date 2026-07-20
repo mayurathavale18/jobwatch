@@ -77,6 +77,8 @@ def company_slug(company_name, url=""):
         return "razorpay"
     if "cloudflare" in name:
         return "cloudflare"
+    if "wells fargo" in name:
+        return "wellsfargo"
     # Fallback: derive from URL domain
     m = re.search(r"https?://(?:www\.)?([^/]+)", url)
     if m:
@@ -124,23 +126,24 @@ def extract_gh_job_id(url):
 # Keyword groups derived from facts.md (production skills + common JD terms)
 KEYWORD_CANDIDATES = {
     # Languages
-    "go", "golang", "python", "typescript", "javascript", "java", "scala", "rust", "sql", "bash",
+    "go", "golang", "python", "typescript", "javascript", "java", "scala", "rust", "sql", "bash", "kotlin",
     # Backend / frameworks
     "rest", "rest api", "rest apis", "microservices", "fastapi", "nestjs", "node.js", "nodejs",
     "gin", "krakend", "api gateway", "api gateways", "temporal", "graphql", "hasura", "trpc",
     "sse", "streaming", "webhooks", "event-driven", "event driven architecture",
+    "spring", "spring boot",
     # Data / queues / search
     "postgresql", "postgres", "mysql", "redis", "valkey", "dynamodb", "opensearch", "elasticsearch",
     "mongodb", "s3", "s3 tables", "spark", "sqs", "sns", "dynamodb streams", "eventbridge",
-    "redshift", "athena", "rabbitmq", "kafka",
+    "redshift", "athena", "rabbitmq", "kafka", "cassandra",
     # Infra / DevOps
     "aws", "gcp", "azure", "terraform", "docker", "kubernetes", "k8s", "github actions", "ci/cd",
     "ecs", "ec2", "rds", "lambda", "secrets manager", "cloudwatch", "cloudfront", "route 53",
-    "vpc", "iam", "fargate",
+    "vpc", "iam", "fargate", "bigquery", "ansible", "jenkins",
     # AI / LLM
     "langgraph", "langchain", "rag", "llm", "ai", "ml", "machine learning", "multi-agent",
     "agent", "agents", "agentic", "litellm", "mcp", "vector search", "embedding", "embeddings",
-    "knn", "bm25", "hybrid retrieval",
+    "knn", "bm25", "hybrid retrieval", "pytorch", "tensorflow", "scikit-learn",
     # Frontend
     "react", "next.js", "nextjs", "vite", "nx", "react native", "expo", "pwa",
     "full stack", "fullstack", "frontend",
@@ -254,6 +257,9 @@ CANONICAL_CASE = {
     "data engineer": "Data Engineer", "backend engineer": "Backend Engineer",
     "software engineer": "Software Engineer", "sre": "SRE", "site reliability": "Site Reliability",
     "security": "Security", "networking": "Networking",
+    "cassandra": "Cassandra", "bigquery": "BigQuery", "ansible": "Ansible", "jenkins": "Jenkins",
+    "pytorch": "PyTorch", "tensorflow": "TensorFlow", "scikit-learn": "Scikit-learn",
+    "kotlin": "Kotlin", "spring": "Spring", "spring boot": "Spring Boot",
 }
 
 def canonical_case(kw):
