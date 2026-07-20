@@ -712,14 +712,33 @@ def inject_keyword_emphasis(bullets, skills_section, jd_keywords):
 
 NUMBER_RE = re.compile(r"\d+(?:\.\d+)?%?")
 
+
+def _significant_words(text):
+    """Lowercase word tokens, excluding short/common filler words that
+    don't carry meaning for a resemblance check (rewording naturally
+    changes articles/prepositions; content words should survive)."""
+    stopwords = {
+        "a", "an", "the", "and", "or", "but", "for", "with", "using", "via",
+        "to", "of", "in", "on", "at", "by", "as", "is", "was", "were", "be",
+        "this", "that", "these", "those", "it", "its", "into",
+    }
+    words = re.findall(r"[a-z0-9]+", text.lower())
+    return {w for w in words if w not in stopwords and len(w) > 2}
+
+
 def reword_is_safe(original, reworded, approved_keywords):
     """Mechanically validate an LLM-reworded bullet before it's ever used:
     every number/percentage in the original must appear unchanged in the
-    reworded version, and no KEYWORD_CANDIDATES term may appear in the
+    reworded version, no KEYWORD_CANDIDATES term may appear in the
     reworded version unless it was already in the original OR is in
-    approved_keywords. This is a code check, not the LLM's word -- the
-    LLM cannot talk its way past it.
+    approved_keywords, and the reworded text must retain meaningful
+    word-level overlap with the original (rejects wholesale replacement
+    with unrelated/hallucinated content). This is a code check, not the
+    LLM's word -- the LLM cannot talk its way past it.
     """
+    if len(reworded.strip()) < 10:
+        return False
+
     original_numbers = set(NUMBER_RE.findall(original))
     reworded_numbers = set(NUMBER_RE.findall(reworded))
     if not original_numbers.issubset(reworded_numbers):
@@ -736,6 +755,19 @@ def reword_is_safe(original, reworded, approved_keywords):
     # LaTeX compile downstream.
     if reworded.count("{") != reworded.count("}"):
         return False
+
+    # Reject wholesale replacement: the negative checks above only catch
+    # NEW numbers/keywords, not a fabricated sentence that happens to
+    # contain none -- a hallucinated unrelated bullet with no digits and
+    # no tracked keywords would otherwise pass unconditionally. Require
+    # meaningful word-level overlap with the original as a positive
+    # resemblance signal.
+    original_words = _significant_words(original)
+    if original_words:
+        reworded_words = _significant_words(reworded)
+        overlap = len(original_words & reworded_words) / len(original_words)
+        if overlap < 0.5:
+            return False
 
     return True
 
@@ -776,6 +808,9 @@ def llm_reword_bullet(bullet_text, direct_keywords, hedged_keywords):
         return bullet_text
 
     reworded = reworded.strip().strip('"')
+    if not reworded:
+        return bullet_text
+
     if not reword_is_safe(bullet_text, reworded, approved):
         log("WARN: llm_reword_bullet output failed safety check, falling back to original")
         return bullet_text

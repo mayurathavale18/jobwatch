@@ -302,3 +302,19 @@ def test_llm_reword_bullet_falls_back_to_original_on_llm_failure(monkeypatch):
     )
     result = tr.llm_reword_bullet(original, direct_keywords=["go"], hedged_keywords=[])
     assert result == original
+
+
+def test_reword_is_safe_rejects_unrelated_hallucinated_content():
+    original = "Built and owned a Go-based API gateway routing traffic across 12 microservices."
+    reworded = "Led cross-functional stakeholder alignment initiatives for quarterly planning cycles."
+    assert tr.reword_is_safe(original, reworded, approved_keywords=[]) is False
+
+
+def test_llm_reword_bullet_falls_back_to_original_on_empty_after_strip(monkeypatch):
+    original = "Built and owned a Go-based API gateway routing traffic across 12 microservices."
+    monkeypatch.setattr(
+        tr, "call_opencode",
+        lambda system_prompt, user_content, model=tr.DEFAULT_OPENCODE_MODEL, timeout=20: '   ',
+    )
+    result = tr.llm_reword_bullet(original, direct_keywords=["go"], hedged_keywords=[])
+    assert result == original
