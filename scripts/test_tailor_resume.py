@@ -351,3 +351,52 @@ def test_process_job_marks_failed_when_compile_fails(monkeypatch, tmp_path):
     tailored, outcome = tr.process_job(job, {})
     assert outcome == "failed"
     assert tailored["2"]["status"] == "failed"
+
+
+def test_send_telegram_caption_includes_verdict_and_missing(monkeypatch, tmp_path):
+    monkeypatch.setattr(tr, "TG_TOKEN", "fake-token")
+    monkeypatch.setattr(tr, "TG_CHAT", "fake-chat")
+
+    captured = {}
+    def fake_run(cmd, capture_output, text, timeout):
+        captured["cmd"] = cmd
+        class FakeResult:
+            stdout = '{"ok": true}'
+        return FakeResult()
+    monkeypatch.setattr(tr.subprocess, "run", fake_run)
+
+    pdf_path = tmp_path / "resume.pdf"
+    pdf_path.write_bytes(b"%PDF-fake")
+
+    judgment = {"verdict": "screen", "reason": "Strong match.", "source": "llm", "missing_keywords": ["kubernetes", "graphql"]}
+    ok, err = tr.send_telegram(
+        pdf_path, "Acme", "Backend Engineer", "https://example.com/job", 0.8, "42",
+        judgment=judgment, hedged_keywords=["kafka"], jd_unavailable=False,
+    )
+    assert ok is True
+    caption = next(v for v in captured["cmd"] if v.startswith("caption="))
+    assert "SCREEN" in caption
+    assert "Strong match." in caption
+    assert "kubernetes" in caption and "graphql" in caption
+    assert "Kafka" in caption or "kafka" in caption
+    assert "#J42" in caption
+
+
+def test_send_telegram_caption_flags_jd_unavailable(monkeypatch, tmp_path):
+    monkeypatch.setattr(tr, "TG_TOKEN", "fake-token")
+    monkeypatch.setattr(tr, "TG_CHAT", "fake-chat")
+
+    def fake_run(cmd, capture_output, text, timeout):
+        class FakeResult:
+            stdout = '{"ok": true}'
+        return FakeResult()
+    monkeypatch.setattr(tr.subprocess, "run", fake_run)
+
+    pdf_path = tmp_path / "resume.pdf"
+    pdf_path.write_bytes(b"%PDF-fake")
+
+    ok, _ = tr.send_telegram(
+        pdf_path, "Acme", "Backend Engineer", "https://example.com/job", 0.3, "43",
+        judgment=None, hedged_keywords=None, jd_unavailable=True,
+    )
+    assert ok is True

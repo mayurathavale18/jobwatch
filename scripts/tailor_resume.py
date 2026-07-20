@@ -949,14 +949,34 @@ def get_page_count(pdf_path):
 # -----------------------------------------------------------------------------
 # Telegram
 # -----------------------------------------------------------------------------
-def send_telegram(pdf_path, company, title, url, score, job_id, reply_to_message_id=None):
+def send_telegram(pdf_path, company, title, url, score, job_id, reply_to_message_id=None,
+                   judgment=None, hedged_keywords=None, jd_unavailable=False):
     """Send Telegram notification with PDF document."""
     if not TG_TOKEN or not TG_CHAT:
         return False, "Telegram credentials not configured"
 
-    # Trailing #J{job_id} lets replies to this message resolve back to the
-    # job via jobwatch's tg-sync, same as the plain-text poll notifications.
-    caption = f"{company} \u2014 {title}\nCoverage: {score}/1.0\nApply: {url}\n#J{job_id}"
+    lines = [f"{company} \u2014 {title}"]
+
+    if judgment:
+        verdict_label = "SCREEN \u2705" if judgment["verdict"] == "screen" else "REJECT-RISK \u26a0\ufe0f"
+        source_note = "" if judgment["source"] == "llm" else " (rule-based, LLM unavailable)"
+        lines.append(f"Verdict: {verdict_label}{source_note} \u2014 {judgment['reason']}")
+
+    lines.append(f"Coverage: {score}/1.0")
+
+    if hedged_keywords:
+        lines.append(f"Hedged (adjacent/familiar): {', '.join(canonical_case(k) for k in hedged_keywords)}")
+
+    if judgment and judgment.get("missing_keywords"):
+        lines.append(f"Missing: {', '.join(judgment['missing_keywords'][:5])}")
+
+    if jd_unavailable:
+        lines.append("\u26a0\ufe0f JD text unavailable \u2014 coverage/verdict unreliable, resume generated from title only")
+
+    lines.append(f"Apply: {url}")
+    lines.append(f"#J{job_id}")
+    caption = "\n".join(lines)
+
     cmd = [
         "curl", "-s", "-X", "POST",
         f"https://api.telegram.org/bot{TG_TOKEN}/sendDocument",
