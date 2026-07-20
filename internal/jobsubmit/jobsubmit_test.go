@@ -110,3 +110,43 @@ func TestInsertManualJobTitleFetchFailsStillInserts(t *testing.T) {
 		t.Errorf("title empty, want a placeholder mentioning the fetch failure")
 	}
 }
+
+func TestInsertManualJobCompanyFromURLHandlesCcTLDs(t *testing.T) {
+	ctx := context.Background()
+	st := openTestStore(t)
+
+	tests := []struct {
+		url           string
+		expectedTitle string
+		wantCompany   string
+	}{
+		{
+			url:         "https://somecompany.co.in/careers/123",
+			wantCompany: "Somecompany",
+		},
+		{
+			url:         "https://somecompany.co.uk/jobs/123",
+			wantCompany: "Somecompany",
+		},
+		{
+			url:         "https://valorem.keka.com/careers/jobdetails/124256",
+			wantCompany: "Keka",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.wantCompany, func(t *testing.T) {
+			pages := fakePages{titles: map[string]string{tt.url: "Test Job Title"}}
+			_, existed, company, _, err := InsertManualJob(ctx, st, tt.url, pages)
+			if err != nil {
+				t.Fatalf("InsertManualJob: %v", err)
+			}
+			if existed {
+				t.Errorf("existed = true, want false for a fresh URL")
+			}
+			if company != tt.wantCompany {
+				t.Errorf("company = %q, want %q", company, tt.wantCompany)
+			}
+		})
+	}
+}

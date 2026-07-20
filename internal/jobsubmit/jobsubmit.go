@@ -71,6 +71,18 @@ func (h HTTPPageFetcher) FetchTitle(ctx context.Context, rawURL string) (string,
 
 var nonAlnum = regexp.MustCompile(`[^a-z0-9]+`)
 
+// twoLabelSuffixes are public suffixes that are themselves two DNS labels
+// (e.g. "co.in", not just "in"), so a host ending in one of them --
+// "somecompany.co.in" -- must not be mistaken for a real subdomain the way
+// "valorem.keka.com" is (where "keka.com" is the real company domain and
+// "valorem" is just a tenant subdomain on Keka's platform). Not exhaustive
+// -- covers the common cases this tool is likely to see; companyFromURL is
+// already documented as a best-effort guess, correctable via a "note:" reply.
+var twoLabelSuffixes = map[string]bool{
+	"co.in": true, "co.uk": true, "co.nz": true, "co.za": true, "co.jp": true,
+	"co.id": true, "co.ke": true, "com.au": true, "com.br": true, "com.sg": true, "com.mx": true,
+}
+
 // companyFromURL guesses a display company name from a job URL's host
 // (e.g. "www.keka.com" -> "Keka"). Placeholder, not a real company lookup
 // -- correct it via a "note:" Telegram reply if it's wrong.
@@ -83,11 +95,11 @@ func companyFromURL(rawURL string) string {
 	parts := strings.Split(host, ".")
 
 	var root string
-	if len(parts) > 2 {
-		// Has subdomain beyond www, take the main domain (second from left)
+	if len(parts) > 2 && !twoLabelSuffixes[strings.Join(parts[len(parts)-2:], ".")] {
+		// Has a real subdomain beyond www, take the main domain (second from left)
 		root = parts[1]
 	} else if len(parts) >= 1 {
-		// No subdomain or just www, take the first part
+		// No subdomain, just www, or a two-label ccTLD suffix -- take the first part
 		root = parts[0]
 	}
 
