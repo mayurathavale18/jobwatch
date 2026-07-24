@@ -56,12 +56,21 @@ func (s *Server) spaHandler() http.Handler {
 		path := r.URL.Path
 		if path != "/" {
 			if _, err := fs.Stat(s.dist, path[1:]); err != nil {
+				// index.html has no content hash in its filename (unlike
+				// the JS/CSS bundles it references), so it must never be
+				// cached -- otherwise a browser that cached it before a
+				// deploy keeps loading the old JS bundle by its old,
+				// still-valid hashed URL, silently missing new features.
+				w.Header().Set("Cache-Control", "no-cache")
 				r2 := new(http.Request)
 				*r2 = *r
 				r2.URL.Path = "/"
 				fileServer.ServeHTTP(w, r2)
 				return
 			}
+		}
+		if path == "/" {
+			w.Header().Set("Cache-Control", "no-cache")
 		}
 		fileServer.ServeHTTP(w, r)
 	})

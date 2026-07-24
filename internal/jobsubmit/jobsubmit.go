@@ -119,7 +119,13 @@ func manualSlug(rawURL string) string {
 // "new", so it rides the existing tailor-resume pipeline the same as any
 // polled job) and reports whether it already existed. Re-submitting the
 // same URL is a no-op (dedupe key includes the URL itself as external_id).
-func InsertManualJob(ctx context.Context, st *store.Store, rawURL string, pages PageFetcher) (id int64, alreadyExisted bool, company string, title string, err error) {
+// jdText is optional user-supplied JD text (dashboard's "paste JD text"
+// field or an uploaded .txt/.md file) -- stored verbatim so
+// tailor_resume.py can use it instead of attempting its own scrape, which
+// routinely fails for the exact sources this manual-submit path exists
+// for (Workday, Naukri, etc). Empty for the Telegram bare-URL-forward
+// path, which has no way to supply it.
+func InsertManualJob(ctx context.Context, st *store.Store, rawURL string, jdText string, pages PageFetcher) (id int64, alreadyExisted bool, company string, title string, err error) {
 	company = companyFromURL(rawURL)
 	slug := manualSlug(rawURL)
 
@@ -158,6 +164,7 @@ func InsertManualJob(ctx context.Context, st *store.Store, rawURL string, pages 
 		URL:         rawURL,
 		FirstSeenAt: time.Now().UTC(),
 		Raw:         json.RawMessage(`{}`),
+		JDText:      jdText,
 	}
 
 	newID, err := st.InsertJob(ctx, tx, job, store.StatusNew)

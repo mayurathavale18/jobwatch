@@ -10,10 +10,17 @@ function filtersFromLocation(): { status: string; company: string; q: string } {
   }
 }
 
+function pageFromLocation(): number {
+  const raw = Number(new URLSearchParams(window.location.search).get('page'))
+  return raw > 1 ? raw : 1
+}
+
 export default function Jobs() {
   const [filters, setFilters] = useState(filtersFromLocation)
+  const [page, setPage] = useState(pageFromLocation)
   const [data, setData] = useState<JobsResponse | null>(null)
   const [manualUrl, setManualUrl] = useState('')
+  const [manualJdText, setManualJdText] = useState('')
   const [manualStatus, setManualStatus] = useState<string | null>(null)
   const [manualSubmitting, setManualSubmitting] = useState(false)
 
@@ -23,17 +30,29 @@ export default function Jobs() {
   // and pulling one in for a single event handler isn't worth it.
   async function handleSubmitManualJob(e: { preventDefault: () => void }) {
     e.preventDefault()
-    if (!manualUrl.trim()) return
+    const url = manualUrl.trim()
+    if (!url) return
+    // Validation moved here from the native <input required type="url">
+    // constraint: on some mobile browsers/layouts, a failing native
+    // constraint cancels the submit event before this handler ever runs
+    // and renders no visible bubble -- the tap just does nothing, with
+    // no way to tell what went wrong. Explicit JS validation always
+    // surfaces a result through manualStatus, on every platform.
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      setManualStatus('Enter a valid http(s) URL.')
+      return
+    }
     setManualSubmitting(true)
     setManualStatus(null)
     try {
-      const result = await submitManualJob(manualUrl.trim())
+      const result = await submitManualJob(url, manualJdText.trim())
       setManualStatus(
         result.alreadyExisted
           ? `Already added — #J${result.id} (${result.company})`
           : `Added #J${result.id} — ${result.company} — resume incoming on Telegram`,
       )
       setManualUrl('')
+      setManualJdText('')
     } catch (err) {
       setManualStatus(`Failed to add: ${err instanceof Error ? err.message : String(err)}`)
     } finally {
@@ -41,16 +60,35 @@ export default function Jobs() {
     }
   }
 
+  // Reads a dropped/picked .txt or .md file client-side and drops its
+  // content into the JD-text textarea, overwriting whatever was there --
+  // one JD-text source at a time, not appended.
+  function handleJdFileChange(e: { target: { files: FileList | null } }) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = () => {
+      if (typeof reader.result === 'string') setManualJdText(reader.result)
+    }
+    reader.readAsText(file)
+  }
+
   useEffect(() => {
     const params = new URLSearchParams()
     if (filters.status) params.set('status', filters.status)
     if (filters.company) params.set('company', filters.company)
     if (filters.q) params.set('q', filters.q)
+    if (page > 1) params.set('page', String(page))
     const qs = params.toString()
     window.history.replaceState(null, '', qs ? `/?${qs}` : '/')
 
-    fetchJobs(filters).then(setData).catch(console.error)
-  }, [filters])
+    fetchJobs({ ...filters, page }).then(setData).catch(console.error)
+  }, [filters, page])
+
+  function updateFilters(patch: Partial<{ status: string; company: string; q: string }>) {
+    setFilters((f) => ({ ...f, ...patch }))
+    setPage(1)
+  }
 
   async function updateStatus(id: number, status: string) {
     await patchJob(id, { status })
@@ -67,18 +105,27 @@ export default function Jobs() {
 
   return (
     <>
-      <form className="add-job" onSubmit={handleSubmitManualJob}>
-        <input
-          type="url"
-          placeholder="Paste a job posting URL (Keka, Workday, anywhere)..."
-          value={manualUrl}
-          onChange={(e) => setManualUrl(e.target.value)}
-          required
-        />
-        <button type="submit" disabled={manualSubmitting}>
-          {manualSubmitting ? 'Adding…' : 'Add & Tailor'}
-        </button>
-        {manualStatus && <span className="add-job-status">{manualStatus}</span>}
+      <form className="add-job-form" onSubmit={handleSubmitManualJob} noValidate>
+        <div className="add-job">
+          <input
+            type="url"
+            placeholder="Paste a job posting URL (Keka, Workday, anywhere)..."
+            value={manualUrl}
+            onChange={(e) => setManualUrl(e.target.value)}
+          />
+          <button type="submit" disabled={manualSubmitting}>
+            {manualSubmitting ? 'Adding…' : 'Add & Tailor'}
+          </button>
+          {manualStatus && <span className="add-job-status">{manualStatus}</span>}
+        </div>
+        <div className="add-job-jd">
+          <textarea
+            placeholder="Paste JD text (optional) — used instead of scraping the link"
+            value={manualJdText}
+            onChange={(e) => setManualJdText(e.target.value)}
+          />
+          <input type="file" accept=".txt,.md" onChange={handleJdFileChange} />
+        </div>
       </form>
 
       <div className="stats">
@@ -107,7 +154,7 @@ export default function Jobs() {
       <div className="filters">
         <select
           value={filters.status}
-          onChange={(e) => setFilters((f) => ({ ...f, status: e.target.value }))}
+          onChange={(e) => updateFilters({ status: e.target.value })}
         >
           <option value="">All statuses</option>
           {data.statuses.map((s) => (
@@ -118,7 +165,7 @@ export default function Jobs() {
         </select>
         <select
           value={filters.company}
-          onChange={(e) => setFilters((f) => ({ ...f, company: e.target.value }))}
+          onChange={(e) => updateFilters({ company: e.target.value })}
         >
           <option value="">All companies</option>
           {data.companies.map((c) => (
@@ -131,7 +178,7 @@ export default function Jobs() {
           type="text"
           placeholder="Search title..."
           value={filters.q}
-          onChange={(e) => setFilters((f) => ({ ...f, q: e.target.value }))}
+          onChange={(e) => updateFilters({ q: e.target.value })}
         />
         <a href="/">Reset</a>
       </div>
@@ -191,6 +238,24 @@ export default function Jobs() {
           )}
         </tbody>
       </table>
+
+      {data.totalFiltered > data.pageSize && (
+        <div className="pagination">
+          <button type="button" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
+            Prev
+          </button>
+          <span>
+            Page {page} of {Math.max(1, Math.ceil(data.totalFiltered / data.pageSize))}
+          </span>
+          <button
+            type="button"
+            disabled={page >= Math.ceil(data.totalFiltered / data.pageSize)}
+            onClick={() => setPage((p) => p + 1)}
+          >
+            Next
+          </button>
+        </div>
+      )}
     </>
   )
 }

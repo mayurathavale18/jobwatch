@@ -88,6 +88,7 @@ CREATE TABLE IF NOT EXISTS jobs (
 	status TEXT NOT NULL DEFAULT 'new',
 	notes TEXT NOT NULL DEFAULT '',
 	raw JSON,
+	manual_jd_text TEXT NOT NULL DEFAULT '',
 	UNIQUE(provider, company_slug, external_id)
 );
 
@@ -110,8 +111,13 @@ CREATE TABLE IF NOT EXISTS kv (
 	value TEXT NOT NULL
 );
 `
-	_, err := s.db.Exec(schema)
-	return err
+	if _, err := s.db.Exec(schema); err != nil {
+		return err
+	}
+	// Add the column for existing DBs (created before manual_jd_text existed)
+	// Try to add the column; ignore "duplicate column" errors from pre-existing DBs that already have it
+	_, _ = s.db.Exec(`ALTER TABLE jobs ADD COLUMN manual_jd_text TEXT NOT NULL DEFAULT ''`)
+	return nil
 }
 
 // Exists reports whether a job with the given dedupe key is already stored.
@@ -191,11 +197,11 @@ func (s *Store) InsertJob(ctx context.Context, tx *sql.Tx, job providers.Job, st
 	}
 
 	res, err := tx.ExecContext(ctx, `
-		INSERT INTO jobs (provider, company_slug, company_name, external_id, title, location, url, posted_at, first_seen_at, status, raw)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		INSERT INTO jobs (provider, company_slug, company_name, external_id, title, location, url, posted_at, first_seen_at, status, raw, manual_jd_text)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		job.Provider, job.CompanySlug, job.CompanyName, job.ExternalID,
 		job.Title, job.Location, job.URL, postedAt,
-		job.FirstSeenAt.UTC().Format(time.RFC3339), status, string(raw),
+		job.FirstSeenAt.UTC().Format(time.RFC3339), status, string(raw), job.JDText,
 	)
 	if err != nil {
 		return 0, err
@@ -248,18 +254,19 @@ func updateNotesExecer(ctx context.Context, e execer, id int64, notes string) er
 
 // JobRow is a job as read back from the database for display.
 type JobRow struct {
-	ID          int64
-	Provider    string
-	CompanySlug string
-	CompanyName string
-	ExternalID  string
-	Title       string
-	Location    string
-	URL         string
-	PostedAt    sql.NullString
-	FirstSeenAt string
-	Status      string
-	Notes       string
+	ID           int64
+	Provider     string
+	CompanySlug  string
+	CompanyName  string
+	ExternalID   string
+	Title        string
+	Location     string
+	URL          string
+	PostedAt     sql.NullString
+	FirstSeenAt  string
+	Status       string
+	Notes        string
+	ManualJDText string
 }
 
 // JobFilter narrows ListJobs results.
@@ -267,10 +274,13 @@ type JobFilter struct {
 	Status  string // exact match, empty = any
 	Company string // exact match on company_name, empty = any
 	Search  string // substring match on title, empty = any
+	Limit   int    // 0 = unlimited
+	Offset  int
 }
 
-func (s *Store) ListJobs(ctx context.Context, f JobFilter) ([]JobRow, error) {
-	query := `SELECT id, provider, company_slug, company_name, external_id, title, location, url, posted_at, first_seen_at, status, notes FROM jobs WHERE 1=1`
+// filterWhere builds the shared WHERE clause + args for ListJobs and CountJobs.
+func filterWhere(f JobFilter) (string, []any) {
+	query := ` WHERE 1=1`
 	var args []any
 
 	if f.Status != "" {
@@ -285,7 +295,17 @@ func (s *Store) ListJobs(ctx context.Context, f JobFilter) ([]JobRow, error) {
 		query += ` AND title LIKE ? ESCAPE '\'`
 		args = append(args, "%"+escapeLike(f.Search)+"%")
 	}
+	return query, args
+}
+
+func (s *Store) ListJobs(ctx context.Context, f JobFilter) ([]JobRow, error) {
+	where, args := filterWhere(f)
+	query := `SELECT id, provider, company_slug, company_name, external_id, title, location, url, posted_at, first_seen_at, status, notes, manual_jd_text FROM jobs` + where
 	query += ` ORDER BY first_seen_at DESC, id DESC`
+	if f.Limit > 0 {
+		query += ` LIMIT ? OFFSET ?`
+		args = append(args, f.Limit, f.Offset)
+	}
 
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -297,12 +317,21 @@ func (s *Store) ListJobs(ctx context.Context, f JobFilter) ([]JobRow, error) {
 	for rows.Next() {
 		var j JobRow
 		if err := rows.Scan(&j.ID, &j.Provider, &j.CompanySlug, &j.CompanyName, &j.ExternalID,
-			&j.Title, &j.Location, &j.URL, &j.PostedAt, &j.FirstSeenAt, &j.Status, &j.Notes); err != nil {
+			&j.Title, &j.Location, &j.URL, &j.PostedAt, &j.FirstSeenAt, &j.Status, &j.Notes, &j.ManualJDText); err != nil {
 			return nil, err
 		}
 		out = append(out, j)
 	}
 	return out, rows.Err()
+}
+
+// CountJobs returns the count of jobs matching f's Status/Company/Search
+// (Limit/Offset ignored), for pagination totals.
+func (s *Store) CountJobs(ctx context.Context, f JobFilter) (int, error) {
+	where, args := filterWhere(f)
+	var n int
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM jobs`+where, args...).Scan(&n)
+	return n, err
 }
 
 func escapeLike(s string) string {
@@ -325,10 +354,10 @@ func (s *Store) GetJobTx(ctx context.Context, tx *sql.Tx, id int64) (JobRow, err
 func getJobQuerier(ctx context.Context, q querier, id int64) (JobRow, error) {
 	var j JobRow
 	err := q.QueryRowContext(ctx,
-		`SELECT id, provider, company_slug, company_name, external_id, title, location, url, posted_at, first_seen_at, status, notes FROM jobs WHERE id = ?`,
+		`SELECT id, provider, company_slug, company_name, external_id, title, location, url, posted_at, first_seen_at, status, notes, manual_jd_text FROM jobs WHERE id = ?`,
 		id,
 	).Scan(&j.ID, &j.Provider, &j.CompanySlug, &j.CompanyName, &j.ExternalID,
-		&j.Title, &j.Location, &j.URL, &j.PostedAt, &j.FirstSeenAt, &j.Status, &j.Notes)
+		&j.Title, &j.Location, &j.URL, &j.PostedAt, &j.FirstSeenAt, &j.Status, &j.Notes, &j.ManualJDText)
 	return j, err
 }
 
