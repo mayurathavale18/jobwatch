@@ -1027,7 +1027,8 @@ def get_page_count(pdf_path):
 # Telegram
 # -----------------------------------------------------------------------------
 def send_telegram(pdf_path, company, title, url, score, job_id, reply_to_message_id=None,
-                   judgment=None, hedged_keywords=None, jd_unavailable=False):
+                   judgment=None, hedged_keywords=None, jd_unavailable=False,
+                   instructions_pending=False):
     """Send Telegram notification with PDF document."""
     if not TG_TOKEN or not TG_CHAT:
         return False, "Telegram credentials not configured"
@@ -1046,6 +1047,9 @@ def send_telegram(pdf_path, company, title, url, score, job_id, reply_to_message
 
     if judgment and judgment.get("missing_keywords"):
         lines.append(f"Missing: {', '.join(judgment['missing_keywords'][:5])}")
+
+    if instructions_pending:
+        lines.append("\u26a0\ufe0f Edit instructions not applied \u2014 LLM unavailable, reply fix/update again to retry")
 
     if jd_unavailable:
         lines.append("\u26a0\ufe0f JD text unavailable \u2014 coverage/verdict unreliable, resume generated from title only")
@@ -1127,21 +1131,36 @@ def save_tailored(data):
     with open(TAILORED_JSON_PATH, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
-def rebuild_one(job_id, reply_to_message_id=None):
-    """Regenerate one job's tailored resume from scratch against the current
-    master.tex, recompile, verify, and resend. This is the 'fix' Telegram
-    reply command's implementation: it reuses the exact same relevance-scored
-    generation path as the normal batch run (build_experience_bullets /
-    build_projects_section already rank content by JD-focus match), rather
-    than a separate naive-truncation post-processor -- so a "fix" always
-    reflects the latest master.tex layout fixes, not a stale patched-in-place
-    .tex file.
+def rebuild_one(job_id, reply_to_message_id=None, mode="fix", instruction=None):
+    """Regenerate one job's tailored resume, recompile, verify, and resend.
+    This is the 'fix'/'update' Telegram reply commands' implementation.
+
+    mode="fix" always rebuilds the {skills_section, bullets, projects}
+    triple fresh from the rule-based generator (build_resume_fields),
+    exactly like the original bare-"fix" behavior, and refreshes the
+    cached base for future "update" calls. mode="update" reuses the last
+    cached base triple (entry["base_tex_fields"]) instead of rebuilding it
+    -- falling back to a fresh build if no cached base exists yet (a job
+    that's never been through a "fix" cycle).
+
+    Both modes then apply the job's full accumulated instruction list
+    (tailored.json's entry["instructions"], appended to on every non-empty
+    fix:/update: reply) via apply_instructions() before splicing -- always
+    from the same clean base, not chained onto a previous edit's output,
+    to avoid compounding LLM drift across repeated fixes.
     """
     tailored = load_tailored()
     entry = tailored.get(job_id)
     if not entry:
         log(f"ERROR: job {job_id} not found in tracker")
         return False, f"Job {job_id} not found in tracker"
+
+    if instruction:
+        updated_instructions = list(entry.get("instructions") or [])
+        updated_instructions.append(instruction)
+        entry = {**entry, "instructions": updated_instructions}
+        tailored[job_id] = entry
+        save_tailored(tailored)
 
     company = entry.get("company", "Unknown")
     title = entry.get("title", "Unknown")
@@ -1175,13 +1194,31 @@ def rebuild_one(job_id, reply_to_message_id=None):
     final_error = None
     resume_text = ""
     jd_keywords = []
+    instructions_applied = True
+    fresh_base_fields = None  # set only when this attempt built fields fresh (not reused from cache)
 
     while attempt < 2 and not success:
         attempt += 1
         tight = (attempt == 2)
         log(f"  Rebuild attempt {attempt} (tight={tight}) for job {job_id}...")
 
-        tex_content, focus, jd_keywords = generate_resume(job, jd_data, tight=tight)
+        use_cache = mode == "update" and bool(entry.get("base_tex_fields"))
+        if use_cache:
+            cached = entry["base_tex_fields"]
+            skills_section, bullets, projects = cached["skills_section"], cached["bullets"], cached["projects"]
+            jd_keywords = extract_keywords(jd_data.get("content_text", ""))
+        else:
+            skills_section, bullets, projects, _focus, jd_keywords = build_resume_fields(job, jd_data, tight=tight)
+            fresh_base_fields = {"skills_section": skills_section, "bullets": bullets, "projects": projects}
+
+        instructions = entry.get("instructions") or []
+        if instructions:
+            (skills_section, bullets, projects), instructions_applied = apply_instructions(
+                skills_section, bullets, projects, instructions
+            )
+
+        master = load_master_tex()
+        tex_content = splice_resume_fields(master, skills_section, bullets, projects)
         with open(tex_path, "w", encoding="utf-8") as f:
             f.write(tex_content)
 
@@ -1199,6 +1236,11 @@ def rebuild_one(job_id, reply_to_message_id=None):
 
         resume_text = tex_content
         success = True
+
+    if success and fresh_base_fields is not None:
+        entry = {**entry, "base_tex_fields": fresh_base_fields}
+        tailored[job_id] = entry
+        save_tailored(tailored)
 
     if not success:
         log(f"  REBUILD FAILED for job {job_id}: {(final_error or '')[:200]}")
@@ -1225,8 +1267,10 @@ def rebuild_one(job_id, reply_to_message_id=None):
     }
     save_tailored(tailored)
 
+    instructions_pending = bool(entry.get("instructions")) and not instructions_applied
     tg_ok, tg_error = send_telegram(pdf_path, company, title, url, score, job_id,
-                                     reply_to_message_id=reply_to_message_id)
+                                     reply_to_message_id=reply_to_message_id,
+                                     instructions_pending=instructions_pending)
     tailored[job_id]["telegram_error"] = None if tg_ok else tg_error
     save_tailored(tailored)
     if tg_ok:

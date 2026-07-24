@@ -1,5 +1,6 @@
 """Tests for scripts/tailor_resume.py. Run with: pytest scripts/test_tailor_resume.py -v"""
 import json
+import sqlite3
 import sys
 from pathlib import Path
 
@@ -491,3 +492,142 @@ def test_build_and_splice_equals_generate_resume():
     assert got_master == want_master
     assert focus == want_focus
     assert jd_keywords == want_keywords
+
+
+def _make_empty_jobs_db(path):
+    """A real sqlite file with an empty jobs table -- rebuild_one() opens
+    DB_PATH with mode=ro, which raises OperationalError on a genuinely
+    missing file rather than falling back, so tests need a real file here."""
+    conn = sqlite3.connect(path)
+    conn.execute("CREATE TABLE jobs (id INTEGER PRIMARY KEY)")
+    conn.commit()
+    conn.close()
+
+
+def test_rebuild_one_update_mode_reuses_cached_base_fields(monkeypatch, tmp_path):
+    tailored_path = tmp_path / "tailored.json"
+    monkeypatch.setattr(tr, "TAILORED_JSON_PATH", tailored_path)
+    db_path = tmp_path / "test.db"
+    _make_empty_jobs_db(db_path)
+    monkeypatch.setattr(tr, "DB_PATH", db_path)
+    monkeypatch.setattr(tr, "OUTPUT_ROOT", tmp_path / "out")
+
+    cached_fields = {
+        "skills_section": "\\techSkill{Languages}{Go}",
+        "bullets": ["Cached bullet."],
+        "projects": "\\resumeItem{Cached project.}",
+    }
+    tr.save_tailored({
+        "1": {
+            "company": "Stripe", "title": "Backend Engineer", "url": "https://stripe.com/jobs/1",
+            "status": "done", "base_tex_fields": cached_fields, "instructions": [],
+        }
+    })
+
+    build_calls = []
+    monkeypatch.setattr(
+        tr, "build_resume_fields",
+        lambda job, jd_data, tight=False: build_calls.append(1) or (
+            "fresh skills", ["fresh bullet"], "fresh projects", "focus", ["kw"]
+        ),
+    )
+    monkeypatch.setattr(tr, "splice_resume_fields", lambda master, s, b, p: f"MASTER::{s}::{b}::{p}")
+    monkeypatch.setattr(tr, "compile_tex", lambda tex_path: (True, ""))
+    monkeypatch.setattr(tr, "get_page_count", lambda pdf_path: 1)
+    monkeypatch.setattr(tr, "score_coverage", lambda keywords, resume_text: (1.0, [], [], []))
+    monkeypatch.setattr(tr, "send_telegram", lambda *a, **kw: (True, None))
+    monkeypatch.setattr(tr, "update_job_status", lambda job_id, status: None)
+
+    ok, err = tr.rebuild_one("1", reply_to_message_id="100", mode="update", instruction=None)
+
+    assert ok is True
+    assert err is None
+    assert build_calls == []  # cached base fields were reused, not rebuilt
+
+    tailored = tr.load_tailored()
+    assert "MASTER::\\techSkill{Languages}{Go}::['Cached bullet.']::\\resumeItem{Cached project.}" == open(
+        tailored["1"]["tex_path"], encoding="utf-8"
+    ).read()
+
+
+def test_rebuild_one_persists_and_applies_instruction(monkeypatch, tmp_path):
+    tailored_path = tmp_path / "tailored.json"
+    monkeypatch.setattr(tr, "TAILORED_JSON_PATH", tailored_path)
+    db_path = tmp_path / "test.db"
+    _make_empty_jobs_db(db_path)
+    monkeypatch.setattr(tr, "DB_PATH", db_path)
+    monkeypatch.setattr(tr, "OUTPUT_ROOT", tmp_path / "out")
+
+    tr.save_tailored({
+        "1": {"company": "Stripe", "title": "Backend Engineer", "url": "https://stripe.com/jobs/1", "status": "done"},
+    })
+
+    monkeypatch.setattr(
+        tr, "build_resume_fields",
+        lambda job, jd_data, tight=False: ("base skills", ["base bullet"], "base projects", "focus", ["kw"]),
+    )
+    monkeypatch.setattr(tr, "splice_resume_fields", lambda master, s, b, p: "MASTER")
+    monkeypatch.setattr(tr, "compile_tex", lambda tex_path: (True, ""))
+    monkeypatch.setattr(tr, "get_page_count", lambda pdf_path: 1)
+    monkeypatch.setattr(tr, "score_coverage", lambda keywords, resume_text: (1.0, [], [], []))
+    monkeypatch.setattr(tr, "update_job_status", lambda job_id, status: None)
+
+    applied_with = {}
+
+    def fake_apply_instructions(skills, bullets, projects, instructions):
+        applied_with["instructions"] = list(instructions)
+        return (skills, bullets, projects), True
+
+    monkeypatch.setattr(tr, "apply_instructions", fake_apply_instructions)
+
+    sent_kwargs = {}
+
+    def fake_send_telegram(*a, **kw):
+        sent_kwargs.update(kw)
+        return True, None
+
+    monkeypatch.setattr(tr, "send_telegram", fake_send_telegram)
+
+    ok, err = tr.rebuild_one("1", reply_to_message_id="100", mode="fix", instruction="drop the Kafka bullet")
+
+    assert ok is True
+    assert applied_with["instructions"] == ["drop the Kafka bullet"]
+    assert sent_kwargs["instructions_pending"] is False
+
+    tailored = tr.load_tailored()
+    assert tailored["1"]["instructions"] == ["drop the Kafka bullet"]
+    assert tailored["1"]["base_tex_fields"] == {
+        "skills_section": "base skills", "bullets": ["base bullet"], "projects": "base projects",
+    }
+
+
+def test_rebuild_one_flags_instructions_pending_when_llm_unavailable(monkeypatch, tmp_path):
+    tailored_path = tmp_path / "tailored.json"
+    monkeypatch.setattr(tr, "TAILORED_JSON_PATH", tailored_path)
+    db_path = tmp_path / "test.db"
+    _make_empty_jobs_db(db_path)
+    monkeypatch.setattr(tr, "DB_PATH", db_path)
+    monkeypatch.setattr(tr, "OUTPUT_ROOT", tmp_path / "out")
+
+    tr.save_tailored({
+        "1": {"company": "Stripe", "title": "Backend Engineer", "url": "https://stripe.com/jobs/1", "status": "done"},
+    })
+
+    monkeypatch.setattr(
+        tr, "build_resume_fields",
+        lambda job, jd_data, tight=False: ("base skills", ["base bullet"], "base projects", "focus", ["kw"]),
+    )
+    monkeypatch.setattr(tr, "splice_resume_fields", lambda master, s, b, p: "MASTER")
+    monkeypatch.setattr(tr, "compile_tex", lambda tex_path: (True, ""))
+    monkeypatch.setattr(tr, "get_page_count", lambda pdf_path: 1)
+    monkeypatch.setattr(tr, "score_coverage", lambda keywords, resume_text: (1.0, [], [], []))
+    monkeypatch.setattr(tr, "update_job_status", lambda job_id, status: None)
+    monkeypatch.setattr(tr, "apply_instructions", lambda skills, bullets, projects, instructions: ((skills, bullets, projects), False))
+
+    sent_kwargs = {}
+    monkeypatch.setattr(tr, "send_telegram", lambda *a, **kw: sent_kwargs.update(kw) or (True, None))
+
+    ok, err = tr.rebuild_one("1", reply_to_message_id="100", mode="fix", instruction="reword the top bullet")
+
+    assert ok is True
+    assert sent_kwargs["instructions_pending"] is True
