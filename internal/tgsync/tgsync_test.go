@@ -469,8 +469,8 @@ func TestRunFixInvokesScriptWithJobAndReplyIDs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("script was not invoked: %v", err)
 	}
-	if strings.TrimSpace(string(gotArgs)) != "1 1100" {
-		t.Errorf("script args = %q, want \"1 1100\" (job id, reply-to message id)", strings.TrimSpace(string(gotArgs)))
+	if strings.TrimSpace(string(gotArgs)) != "1 1100 fix" {
+		t.Errorf("script args = %q, want \"1 1100 fix\" (job id, reply-to message id, mode)", strings.TrimSpace(string(gotArgs)))
 	}
 }
 
@@ -510,6 +510,95 @@ func TestRunFixCaseInsensitive(t *testing.T) {
 	}
 	if len(fake.replies) != 1 || fake.replies[0].Text != "Resume-fix isn't configured on this install." {
 		t.Errorf("expected \"FIX\" to be treated case-insensitively, got %+v", fake.replies)
+	}
+}
+
+func TestRunFixWithInstructionPassesItToScript(t *testing.T) {
+	dir := t.TempDir()
+	scriptPath := filepath.Join(dir, "fix.sh")
+	argsFile := filepath.Join(dir, "args.txt")
+	script := "#!/bin/sh\necho \"$@\" > " + argsFile + "\nexit 0\n"
+	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("writing fake script: %v", err)
+	}
+
+	ctx := context.Background()
+	st := newTestStoreWithJob(t)
+	fake := &fakeTelegram{all: fixUpdate("fix: reword the top bullet")}
+	syncer := &Syncer{Store: st, TG: fake, ChatID: 555, FixScript: scriptPath}
+
+	if _, err := syncer.Run(ctx); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	gotArgs, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatalf("script was not invoked: %v", err)
+	}
+	want := "1 1100 fix reword the top bullet"
+	if strings.TrimSpace(string(gotArgs)) != want {
+		t.Errorf("script args = %q, want %q", strings.TrimSpace(string(gotArgs)), want)
+	}
+}
+
+func TestRunUpdateWithInstructionPassesItToScript(t *testing.T) {
+	dir := t.TempDir()
+	scriptPath := filepath.Join(dir, "fix.sh")
+	argsFile := filepath.Join(dir, "args.txt")
+	script := "#!/bin/sh\necho \"$@\" > " + argsFile + "\nexit 0\n"
+	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("writing fake script: %v", err)
+	}
+
+	ctx := context.Background()
+	st := newTestStoreWithJob(t)
+	fake := &fakeTelegram{all: fixUpdate("update: drop the Kafka bullet")}
+	syncer := &Syncer{Store: st, TG: fake, ChatID: 555, FixScript: scriptPath}
+
+	if _, err := syncer.Run(ctx); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if len(fake.replies) != 1 || fake.replies[0].Text != "Applying edits, resending shortly…" {
+		t.Errorf("expected update-specific ack reply, got %+v", fake.replies)
+	}
+
+	gotArgs, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatalf("script was not invoked: %v", err)
+	}
+	want := "1 1100 update drop the Kafka bullet"
+	if strings.TrimSpace(string(gotArgs)) != want {
+		t.Errorf("script args = %q, want %q", strings.TrimSpace(string(gotArgs)), want)
+	}
+}
+
+func TestRunBareUpdateRepliesNeedsInstructionsWithoutInvokingScript(t *testing.T) {
+	dir := t.TempDir()
+	scriptPath := filepath.Join(dir, "fix.sh")
+	script := "#!/bin/sh\nexit 1\n" // would surface as a test failure if ever invoked
+	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("writing fake script: %v", err)
+	}
+
+	ctx := context.Background()
+	st := newTestStoreWithJob(t)
+	fake := &fakeTelegram{all: fixUpdate("update")}
+	syncer := &Syncer{Store: st, TG: fake, ChatID: 555, FixScript: scriptPath}
+
+	if _, err := syncer.Run(ctx); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(fake.replies) != 1 || fake.replies[0].Text != updateNeedsInstructionMessage {
+		t.Errorf("expected needs-instructions reply, got %+v", fake.replies)
+	}
+
+	job, err := st.GetJob(ctx, 1)
+	if err != nil {
+		t.Fatalf("GetJob: %v", err)
+	}
+	if job.Status != store.StatusNew {
+		t.Errorf("job status = %q, want unchanged %q", job.Status, store.StatusNew)
 	}
 }
 
