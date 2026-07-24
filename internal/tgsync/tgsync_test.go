@@ -69,6 +69,7 @@ func TestParseFixOrUpdateWithInstructions(t *testing.T) {
 		{"UPDATE: Mention Postgres more", "update", "Mention Postgres more"},
 		{"update:   drop the Kafka bullet  ", "update", "drop the Kafka bullet"},
 		{"fix:", "fix", ""},
+		{"fix: reword the top bullet\nalso mention Kubernetes", "fix", "reword the top bullet\nalso mention Kubernetes"},
 	}
 	for _, c := range cases {
 		mode, instruction, ok := parseFixOrUpdate(c.text)

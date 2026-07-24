@@ -245,7 +245,7 @@ func ParseStatusKeyword(word string) (string, bool) {
 // fixOrUpdateRe matches a "fix:"/"update:" reply carrying free-text edit
 // instructions -- optional whitespace is allowed on either side of the
 // colon since Mayur's own usage includes "fix : {instructions}".
-var fixOrUpdateRe = regexp.MustCompile(`(?i)^(fix|update)\s*:\s*(.*)$`)
+var fixOrUpdateRe = regexp.MustCompile(`(?is)^(fix|update)\s*:\s*(.*)$`)
 
 // parseFixOrUpdate recognizes a "fix"/"fix: ..."/"update"/"update: ..."
 // reply. It reports the lowercased mode, the free-text instruction
