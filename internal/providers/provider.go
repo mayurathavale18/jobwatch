@@ -27,6 +27,10 @@ type Job struct {
 	PostedAt    *time.Time
 	FirstSeenAt time.Time
 	Raw         json.RawMessage
+	// JDText is user-supplied JD text (pasted or from an uploaded file)
+	// from the dashboard's manual-submit form. Empty for every polled
+	// provider -- only jobsubmit.InsertManualJob ever sets it.
+	JDText string
 }
 
 // Provider fetches the current set of open postings for one company.

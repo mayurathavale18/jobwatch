@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"path/filepath"
 	"testing"
 	"time"
@@ -77,6 +78,95 @@ func TestInsertAndDedupe(t *testing.T) {
 	}
 	if got.Title != job.Title || got.Status != StatusNew {
 		t.Errorf("GetJob = %+v", got)
+	}
+}
+
+func TestInsertJobPersistsJDText(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+
+	job := sampleJob()
+	job.JDText = "We need a backend engineer with Go and Kubernetes experience."
+
+	tx, err := s.BeginTx(ctx)
+	if err != nil {
+		t.Fatalf("BeginTx: %v", err)
+	}
+	id, err := s.InsertJob(ctx, tx, job, StatusNew)
+	if err != nil {
+		t.Fatalf("InsertJob: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+
+	got, err := s.GetJob(ctx, id)
+	if err != nil {
+		t.Fatalf("GetJob: %v", err)
+	}
+	if got.ManualJDText != job.JDText {
+		t.Errorf("ManualJDText = %q, want %q", got.ManualJDText, job.JDText)
+	}
+}
+
+func TestMigrateAddsManualJDTextColumnToExistingDB(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.db")
+
+	// Simulate a DB created before manual_jd_text existed -- the original
+	// schema, no ALTER TABLE, no manual_jd_text column at all.
+	raw, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	if _, err := raw.Exec(`
+		CREATE TABLE jobs (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			provider TEXT NOT NULL,
+			company_slug TEXT NOT NULL,
+			company_name TEXT NOT NULL,
+			external_id TEXT NOT NULL,
+			title TEXT NOT NULL,
+			location TEXT NOT NULL DEFAULT '',
+			url TEXT NOT NULL DEFAULT '',
+			posted_at TEXT NULL,
+			first_seen_at TEXT NOT NULL,
+			status TEXT NOT NULL DEFAULT 'new',
+			notes TEXT NOT NULL DEFAULT '',
+			raw JSON,
+			UNIQUE(provider, company_slug, external_id)
+		)`); err != nil {
+		t.Fatalf("creating pre-migration schema: %v", err)
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatalf("closing raw db: %v", err)
+	}
+
+	s, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open on pre-migration DB: %v", err)
+	}
+	defer s.Close()
+
+	ctx := context.Background()
+	tx, err := s.BeginTx(ctx)
+	if err != nil {
+		t.Fatalf("BeginTx: %v", err)
+	}
+	id, err := s.InsertJob(ctx, tx, sampleJob(), StatusNew)
+	if err != nil {
+		t.Fatalf("InsertJob after migration: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+
+	got, err := s.GetJob(ctx, id)
+	if err != nil {
+		t.Fatalf("GetJob: %v", err)
+	}
+	if got.ManualJDText != "" {
+		t.Errorf("ManualJDText = %q, want empty default for a job inserted with JDText unset", got.ManualJDText)
 	}
 }
 
