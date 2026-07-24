@@ -1315,6 +1315,7 @@ def process_job(job, tailored):
     if gh_id and gh_slug:
         jd_data = fetch_greenhouse_job(gh_slug, gh_id)
 
+    manual_jd_text_used = False
     if not jd_data:
         manual_jd_text = (job.get("manual_jd_text") or "").strip()
         if manual_jd_text:
@@ -1322,11 +1323,12 @@ def process_job(job, tailored):
                 "title": title, "company_name": company, "content_text": manual_jd_text,
                 "content_html": "", "location": "", "absolute_url": url,
             }
+            manual_jd_text_used = True
 
     jd_unavailable = False
     if not jd_data:
         jd_data = fetch_jd_generic(url)
-    if not jd_data or len(jd_data.get("content_text", "")) < MIN_USABLE_JD_CHARS:
+    if not jd_data or (not manual_jd_text_used and len(jd_data.get("content_text", "")) < MIN_USABLE_JD_CHARS):
         log(f"WARN: Could not fetch usable JD for {jid}; using title only")
         jd_unavailable = True
         jd_data = {

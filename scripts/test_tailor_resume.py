@@ -514,6 +514,44 @@ def test_process_job_whitespace_only_manual_jd_text_falls_through_to_scrape(monk
     assert fetch_jd_generic_called["value"] is True
 
 
+def test_process_job_trusts_short_manual_jd_text_verbatim(monkeypatch, tmp_path):
+    # Regression test: manual_jd_text under MIN_USABLE_JD_CHARS (150) used to
+    # be discarded by the quality-floor check even though it should always be
+    # trusted verbatim once present -- length isn't a signal of "unreliable
+    # scrape" for text the user explicitly pasted in, unlike fetch_jd_generic's
+    # output. A short manual_jd_text must still win over falling back to
+    # title-only, and fetch_jd_generic must never be called.
+    monkeypatch.setattr(tr, "TAILORED_JSON_PATH", tmp_path / "tailored.json")
+    monkeypatch.setattr(tr, "OUTPUT_ROOT", tmp_path / "output")
+    monkeypatch.setattr(tr, "fetch_greenhouse_job", lambda slug, gh_id: None)
+
+    def fail_if_called(url):
+        raise AssertionError("fetch_jd_generic should not be called when manual_jd_text is present")
+    monkeypatch.setattr(tr, "fetch_jd_generic", fail_if_called)
+    monkeypatch.setattr(tr, "compile_tex", lambda tex_path: (True, ""))
+    monkeypatch.setattr(tr, "get_page_count", lambda pdf_path: 1)
+    monkeypatch.setattr(tr, "send_telegram", lambda *a, **kw: (True, None))
+    monkeypatch.setattr(tr, "update_job_status", lambda job_id, status: None)
+
+    captured_jd_data = {}
+
+    def fake_build_resume_fields(job, jd_data, tight=False):
+        captured_jd_data.update(jd_data)
+        return "skills", ["bullet"], "projects", "focus", ["kw"]
+    monkeypatch.setattr(tr, "build_resume_fields", fake_build_resume_fields)
+
+    short_manual_jd_text = "Backend Engineer, Go + Kubernetes, remote OK."  # well under 150 chars
+    assert len(short_manual_jd_text) < tr.MIN_USABLE_JD_CHARS
+    job = {
+        "id": 5, "company_name": "Acme", "title": "Backend Engineer",
+        "url": "https://example.com/5",
+        "manual_jd_text": short_manual_jd_text,
+    }
+    tailored, outcome = tr.process_job(job, {})
+    assert outcome == "sent"
+    assert captured_jd_data["content_text"] == short_manual_jd_text
+
+
 def test_rebuild_one_uses_manual_jd_text_from_db(monkeypatch, tmp_path):
     tailored_path = tmp_path / "tailored.json"
     monkeypatch.setattr(tr, "TAILORED_JSON_PATH", tailored_path)
