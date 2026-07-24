@@ -13,7 +13,17 @@ Read `HANDOFF.md` first for full context. This file is just the commands/facts u
 
 ## Deploying a change
 
-The server is **not** a git clone (private repo, no deploy key on the box) — it's an `rsync` target. After committing+pushing locally:
+**Push to `master` auto-deploys** via `.github/workflows/deploy.yml`: builds the
+frontend, rsyncs `internal cmd config.yaml go.mod go.sum` to the box, rebuilds
+the Go binary as the `jobwatch` user, and restarts the `jobwatch` service.
+Uses a dedicated deploy keypair (public half in `ubuntu`'s
+`authorized_keys` on the box, private half in the `EC2_SSH_KEY` GitHub
+secret) — separate from the personal `jobwatch-key.pem` above, so it can be
+rotated/revoked independently.
+
+For manual/emergency deploys (or anything not on `master` yet), the server is
+**not** a git clone (private repo, no deploy key on the box) — it's an
+`rsync` target. After committing+pushing locally:
 
 ```bash
 IP=16.113.24.110
@@ -37,6 +47,7 @@ diff <(md5sum <local-file>) <(ssh ... "sudo md5sum /opt/jobwatch/<file>")  # con
 ## Recurring gotchas (already bit us once each — don't repeat)
 
 - **`$HOME`-relative paths break on the server.** The `jobwatch` service user's `$HOME` *is* `/opt/jobwatch` (the repo root), not its parent — `$HOME/jobwatch/...` or `Path.home() / "jobwatch" / ...` silently resolves wrong. Every path must resolve relative to the script's own location instead. Check both `.sh` **and** `.py` when auditing for this.
+- **Browser-cached `index.html` hides new dashboard deploys.** `internal/web/server.go`'s `spaHandler` now sets `Cache-Control: no-cache` on `index.html` specifically (JS/CSS are content-hashed filenames, safe to cache normally) — without it, a browser that cached the SPA shell before a deploy keeps loading the old JS bundle by its old, still-valid hashed URL, so a shipped feature can look "missing" even though it deployed fine. If a UI change ever looks live-but-absent, hard-refresh before assuming the deploy failed.
 - **SQLite WAL mode.** `jobwatch.db`'s base file only reflects data that's been checkpointed — `cp`/`rsync` of just the `.db` file can silently drop recent rows still sitting in `.db-wal`. Run `sqlite3 jobwatch.db "PRAGMA wal_checkpoint(TRUNCATE);"` before copying the DB anywhere.
 - **Single Telegram consumer.** Never run `poll`/`tg-sync` from two machines (or two processes) against the same bot at once — whichever polls first silently eats the other's updates, and worse, can double-notify if their DBs are out of sync (happened once during the initial deploy cutover).
 - **tectonic needs `libgraphite2-3`** (apt) or it fails at runtime with a missing shared-library error that only surfaces when a resume actually gets compiled, not during setup. Already in `deploy/setup.sh`.

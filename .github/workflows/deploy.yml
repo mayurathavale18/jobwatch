@@ -1,0 +1,48 @@
+name: Deploy to EC2
+
+on:
+  push:
+    branches: [master]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Set up deploy key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H 16.113.24.110 >> ~/.ssh/known_hosts
+
+      - name: Rsync source + built dashboard to server
+        run: |
+          rsync -az -e "ssh -i ~/.ssh/deploy_key" \
+            internal cmd config.yaml go.mod go.sum \
+            ubuntu@16.113.24.110:/tmp/jobwatch_deploy/
+
+      - name: Install, rebuild binary, restart service
+        run: |
+          ssh -i ~/.ssh/deploy_key ubuntu@16.113.24.110 '
+            set -e
+            sudo cp -a /tmp/jobwatch_deploy/. /opt/jobwatch/
+            sudo chown -R jobwatch:jobwatch /opt/jobwatch
+            rm -rf /tmp/jobwatch_deploy
+            cd /opt/jobwatch
+            sudo -u jobwatch bash -lc "go build -o bin/jobwatch ./cmd/jobwatch"
+            sudo systemctl restart jobwatch
+            sleep 2
+            sudo systemctl is-active --quiet jobwatch
+          '

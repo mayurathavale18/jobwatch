@@ -72,6 +72,9 @@ func TestHandleIndexServesSPAShell(t *testing.T) {
 	if !strings.Contains(body, "jobwatch") {
 		t.Errorf("expected embedded index.html to contain page title, got:\n%s", body)
 	}
+	if got := w.Header().Get("Cache-Control"); got != "no-cache" {
+		t.Errorf("Cache-Control = %q, want no-cache (browsers must revalidate index.html on every load)", got)
+	}
 }
 
 func TestHandleCronPathFallsBackToSPAShell(t *testing.T) {
