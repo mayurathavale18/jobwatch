@@ -446,6 +446,68 @@ def test_process_job_marks_failed_when_compile_fails(monkeypatch, tmp_path):
     assert tailored["2"]["status"] == "failed"
 
 
+def test_process_job_uses_manual_jd_text_skips_fetch_jd_generic(monkeypatch, tmp_path):
+    monkeypatch.setattr(tr, "TAILORED_JSON_PATH", tmp_path / "tailored.json")
+    monkeypatch.setattr(tr, "OUTPUT_ROOT", tmp_path / "output")
+    monkeypatch.setattr(tr, "fetch_greenhouse_job", lambda slug, gh_id: None)
+
+    def fail_if_called(url):
+        raise AssertionError("fetch_jd_generic should not be called when manual_jd_text is present")
+    monkeypatch.setattr(tr, "fetch_jd_generic", fail_if_called)
+    monkeypatch.setattr(tr, "compile_tex", lambda tex_path: (True, ""))
+    monkeypatch.setattr(tr, "get_page_count", lambda pdf_path: 1)
+    monkeypatch.setattr(tr, "send_telegram", lambda *a, **kw: (True, None))
+    monkeypatch.setattr(tr, "update_job_status", lambda job_id, status: None)
+
+    job = {
+        "id": 3, "company_name": "Acme", "title": "Backend Engineer",
+        "url": "https://example.com/3",
+        "manual_jd_text": "We need a backend engineer with Go, Kubernetes, and PostgreSQL experience.",
+    }
+    tailored, outcome = tr.process_job(job, {})
+    assert outcome == "sent"
+
+
+def test_rebuild_one_uses_manual_jd_text_from_db(monkeypatch, tmp_path):
+    tailored_path = tmp_path / "tailored.json"
+    monkeypatch.setattr(tr, "TAILORED_JSON_PATH", tailored_path)
+
+    db_path = tmp_path / "test.db"
+    conn = sqlite3.connect(db_path)
+    conn.execute("CREATE TABLE jobs (id INTEGER PRIMARY KEY, manual_jd_text TEXT NOT NULL DEFAULT '')")
+    conn.execute(
+        "INSERT INTO jobs (id, manual_jd_text) VALUES (1, ?)",
+        ("We need a backend engineer with Go, Kubernetes, and PostgreSQL experience.",),
+    )
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr(tr, "DB_PATH", db_path)
+    monkeypatch.setattr(tr, "OUTPUT_ROOT", tmp_path / "out")
+
+    tr.save_tailored({
+        "1": {"company": "Stripe", "title": "Backend Engineer", "url": "https://stripe.com/jobs/1", "status": "done"},
+    })
+
+    captured_jd_data = {}
+
+    def fake_build_resume_fields(job, jd_data, tight=False):
+        captured_jd_data.update(jd_data)
+        return "skills", ["bullet"], "projects", "focus", ["kw"]
+
+    monkeypatch.setattr(tr, "build_resume_fields", fake_build_resume_fields)
+    monkeypatch.setattr(tr, "splice_resume_fields", lambda master, s, b, p: "MASTER")
+    monkeypatch.setattr(tr, "compile_tex", lambda tex_path: (True, ""))
+    monkeypatch.setattr(tr, "get_page_count", lambda pdf_path: 1)
+    monkeypatch.setattr(tr, "score_coverage", lambda keywords, resume_text: (1.0, [], [], []))
+    monkeypatch.setattr(tr, "send_telegram", lambda *a, **kw: (True, None))
+    monkeypatch.setattr(tr, "update_job_status", lambda job_id, status: None)
+
+    ok, err = tr.rebuild_one("1", reply_to_message_id="100", mode="fix", instruction=None)
+
+    assert ok is True
+    assert captured_jd_data["content_text"] == "We need a backend engineer with Go, Kubernetes, and PostgreSQL experience."
+
+
 def test_send_telegram_caption_includes_verdict_and_missing(monkeypatch, tmp_path):
     monkeypatch.setattr(tr, "TG_TOKEN", "fake-token")
     monkeypatch.setattr(tr, "TG_CHAT", "fake-chat")

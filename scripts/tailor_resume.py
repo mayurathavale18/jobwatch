@@ -1176,6 +1176,13 @@ def rebuild_one(job_id, reply_to_message_id=None, mode="fix", instruction=None):
     gh_id = extract_gh_job_id(url)
     jd_data = fetch_greenhouse_job(gh_slug, gh_id) if (gh_id and gh_slug) else None
     if not jd_data:
+        manual_jd_text = (job.get("manual_jd_text") or "").strip()
+        if manual_jd_text:
+            jd_data = {
+                "title": title, "company_name": company, "content_text": manual_jd_text,
+                "content_html": "", "location": "", "absolute_url": url,
+            }
+    if not jd_data:
         jd_data = {
             "title": title, "company_name": company, "content_text": title,
             "content_html": "", "location": "", "absolute_url": url,
@@ -1307,6 +1314,14 @@ def process_job(job, tailored):
     jd_data = None
     if gh_id and gh_slug:
         jd_data = fetch_greenhouse_job(gh_slug, gh_id)
+
+    if not jd_data:
+        manual_jd_text = (job.get("manual_jd_text") or "").strip()
+        if manual_jd_text:
+            jd_data = {
+                "title": title, "company_name": company, "content_text": manual_jd_text,
+                "content_html": "", "location": "", "absolute_url": url,
+            }
 
     jd_unavailable = False
     if not jd_data:
