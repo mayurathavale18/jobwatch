@@ -82,11 +82,11 @@ export interface ManualJobResponse {
   title: string
 }
 
-export async function submitManualJob(url: string): Promise<ManualJobResponse> {
+export async function submitManualJob(url: string, jdText?: string): Promise<ManualJobResponse> {
   const res = await fetch('/api/jobs/manual', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ url }),
+    body: JSON.stringify(jdText ? { url, jdText } : { url }),
   })
   if (!res.ok) throw new Error(`POST /api/jobs/manual: ${res.status}`)
   return res.json()

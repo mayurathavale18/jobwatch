@@ -14,6 +14,7 @@ export default function Jobs() {
   const [filters, setFilters] = useState(filtersFromLocation)
   const [data, setData] = useState<JobsResponse | null>(null)
   const [manualUrl, setManualUrl] = useState('')
+  const [manualJdText, setManualJdText] = useState('')
   const [manualStatus, setManualStatus] = useState<string | null>(null)
   const [manualSubmitting, setManualSubmitting] = useState(false)
 
@@ -23,22 +24,47 @@ export default function Jobs() {
   // and pulling one in for a single event handler isn't worth it.
   async function handleSubmitManualJob(e: { preventDefault: () => void }) {
     e.preventDefault()
-    if (!manualUrl.trim()) return
+    const url = manualUrl.trim()
+    if (!url) return
+    // Validation moved here from the native <input required type="url">
+    // constraint: on some mobile browsers/layouts, a failing native
+    // constraint cancels the submit event before this handler ever runs
+    // and renders no visible bubble -- the tap just does nothing, with
+    // no way to tell what went wrong. Explicit JS validation always
+    // surfaces a result through manualStatus, on every platform.
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      setManualStatus('Enter a valid http(s) URL.')
+      return
+    }
     setManualSubmitting(true)
     setManualStatus(null)
     try {
-      const result = await submitManualJob(manualUrl.trim())
+      const result = await submitManualJob(url, manualJdText.trim())
       setManualStatus(
         result.alreadyExisted
           ? `Already added — #J${result.id} (${result.company})`
           : `Added #J${result.id} — ${result.company} — resume incoming on Telegram`,
       )
       setManualUrl('')
+      setManualJdText('')
     } catch (err) {
       setManualStatus(`Failed to add: ${err instanceof Error ? err.message : String(err)}`)
     } finally {
       setManualSubmitting(false)
     }
+  }
+
+  // Reads a dropped/picked .txt or .md file client-side and drops its
+  // content into the JD-text textarea, overwriting whatever was there --
+  // one JD-text source at a time, not appended.
+  function handleJdFileChange(e: { target: { files: FileList | null } }) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = () => {
+      if (typeof reader.result === 'string') setManualJdText(reader.result)
+    }
+    reader.readAsText(file)
   }
 
   useEffect(() => {
@@ -67,18 +93,27 @@ export default function Jobs() {
 
   return (
     <>
-      <form className="add-job" onSubmit={handleSubmitManualJob}>
-        <input
-          type="url"
-          placeholder="Paste a job posting URL (Keka, Workday, anywhere)..."
-          value={manualUrl}
-          onChange={(e) => setManualUrl(e.target.value)}
-          required
-        />
-        <button type="submit" disabled={manualSubmitting}>
-          {manualSubmitting ? 'Adding…' : 'Add & Tailor'}
-        </button>
-        {manualStatus && <span className="add-job-status">{manualStatus}</span>}
+      <form className="add-job-form" onSubmit={handleSubmitManualJob} noValidate>
+        <div className="add-job">
+          <input
+            type="url"
+            placeholder="Paste a job posting URL (Keka, Workday, anywhere)..."
+            value={manualUrl}
+            onChange={(e) => setManualUrl(e.target.value)}
+          />
+          <button type="submit" disabled={manualSubmitting}>
+            {manualSubmitting ? 'Adding…' : 'Add & Tailor'}
+          </button>
+          {manualStatus && <span className="add-job-status">{manualStatus}</span>}
+        </div>
+        <div className="add-job-jd">
+          <textarea
+            placeholder="Paste JD text (optional) — used instead of scraping the link"
+            value={manualJdText}
+            onChange={(e) => setManualJdText(e.target.value)}
+          />
+          <input type="file" accept=".txt,.md" onChange={handleJdFileChange} />
+        </div>
       </form>
 
       <div className="stats">
