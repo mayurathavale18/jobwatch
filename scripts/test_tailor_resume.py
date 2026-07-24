@@ -4,6 +4,8 @@ import sqlite3
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import tailor_resume as tr
 
@@ -631,3 +633,22 @@ def test_rebuild_one_flags_instructions_pending_when_llm_unavailable(monkeypatch
 
     assert ok is True
     assert sent_kwargs["instructions_pending"] is True
+
+
+def test_parse_rebuild_cli_args_job_and_reply_only():
+    assert tr._parse_rebuild_cli_args(["5", "1100"]) == ("5", "1100", "fix", None)
+
+
+def test_parse_rebuild_cli_args_with_mode_and_instruction():
+    got = tr._parse_rebuild_cli_args(["5", "1100", "--mode", "update", "--instruction", "reword bullet 2"])
+    assert got == ("5", "1100", "update", "reword bullet 2")
+
+
+def test_parse_rebuild_cli_args_mode_only():
+    got = tr._parse_rebuild_cli_args(["5", "1100", "--mode", "fix"])
+    assert got == ("5", "1100", "fix", None)
+
+
+def test_parse_rebuild_cli_args_too_few_args_raises():
+    with pytest.raises(ValueError):
+        tr._parse_rebuild_cli_args(["5"])

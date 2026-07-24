@@ -1481,14 +1481,38 @@ def main():
     log(f"\n=== Cycle complete ===")
     log(f"Processed: {processed}, Failed: {failed}, Skipped non-eng: {skipped_non_eng}")
 
+
+def _parse_rebuild_cli_args(argv):
+    """Parse the argv following '--rebuild' into (job_id, reply_to, mode,
+    instruction). argv is sys.argv[2:] -- everything after the '--rebuild'
+    token itself. Raises ValueError with a usage message on too few args.
+    """
+    if len(argv) < 2:
+        raise ValueError("--rebuild <job_id> <reply_to_message_id> [--mode fix|update] [--instruction TEXT]")
+    job_id = argv[0]
+    reply_to = argv[1] if argv[1] else None
+    mode = "fix"
+    instruction = None
+    i = 2
+    while i < len(argv):
+        if argv[i] == "--mode" and i + 1 < len(argv):
+            mode = argv[i + 1]
+            i += 2
+        elif argv[i] == "--instruction" and i + 1 < len(argv):
+            instruction = argv[i + 1]
+            i += 2
+        else:
+            i += 1
+    return job_id, reply_to, mode, instruction
+
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "--rebuild":
-        if len(sys.argv) < 3:
-            print("Usage: tailor_resume.py --rebuild <job_id> [reply_to_message_id]", file=sys.stderr)
+        try:
+            _job_id, _reply_to, _mode, _instruction = _parse_rebuild_cli_args(sys.argv[2:])
+        except ValueError as e:
+            print(f"Usage: tailor_resume.py {e}", file=sys.stderr)
             sys.exit(1)
-        _job_id = sys.argv[2]
-        _reply_to = sys.argv[3] if len(sys.argv) > 3 else None
-        _ok, _err = rebuild_one(_job_id, reply_to_message_id=_reply_to)
+        _ok, _err = rebuild_one(_job_id, reply_to_message_id=_reply_to, mode=_mode, instruction=_instruction)
         if not _ok:
             print(f"REBUILD_FAILED: {_err}", file=sys.stderr)
             sys.exit(1)
