@@ -48,6 +48,7 @@ h1 {
 .add-job {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   margin-bottom: 8px;
 }
@@ -58,6 +59,7 @@ h1 {
 }
 
 .add-job-status {
+  flex-basis: 100%;
   font-size: 0.9em;
   color: #888;
 }
@@ -65,6 +67,7 @@ h1 {
 .add-job-jd {
   display: flex;
   align-items: flex-start;
+  flex-wrap: wrap;
   gap: 8px;
   margin-bottom: 12px;
 }
