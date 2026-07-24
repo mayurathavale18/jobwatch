@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/url"
 	"os/exec"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -29,6 +30,8 @@ const helpMessage = `Didn't recognize that. Reply with one of:
   offer                          -> offer
   new / reset                    -> new
 Or start your reply with "note: " to add a note without changing status.`
+
+const updateNeedsInstructionMessage = `update: needs instructions after the colon, e.g. "update: reword the second bullet".`
 
 // telegramClient is the subset of *notify.Telegram tg-sync needs, so tests
 // can substitute a fixture-backed fake.
@@ -180,11 +183,14 @@ func (s *Syncer) processUpdate(ctx context.Context, upd notify.Update) (bool, er
 	text := strings.TrimSpace(msg.Text)
 	lower := strings.ToLower(text)
 
-	if lower == "fix" {
+	if mode, instruction, ok := parseFixOrUpdate(text); ok {
+		if mode == "update" && instruction == "" {
+			return false, s.TG.Reply(ctx, msg.MessageID, updateNeedsInstructionMessage)
+		}
 		if err := tx.Rollback(); err != nil && err != sql.ErrTxDone {
 			return false, err
 		}
-		return false, s.runFix(ctx, jobID, msg.MessageID)
+		return false, s.runFix(ctx, jobID, msg.MessageID, mode, instruction)
 	}
 
 	if strings.HasPrefix(lower, "note:") {
@@ -241,28 +247,75 @@ func ParseStatusKeyword(word string) (string, bool) {
 	}
 }
 
-// runFix invokes FixScript to regenerate and resend a job's tailored resume
-// PDF. The script itself sends the corrected PDF as its own Telegram
-// message (threaded as a reply to replyToMessageID), so runFix only needs
-// to ack immediately (regeneration + LaTeX compile takes a few seconds) and
-// report failure if the script errors.
-func (s *Syncer) runFix(ctx context.Context, jobID int64, replyToMessageID int64) error {
+// fixOrUpdateRe matches a "fix:"/"update:" reply carrying free-text edit
+// instructions -- optional whitespace is allowed on either side of the
+// colon since Mayur's own usage includes "fix : {instructions}".
+var fixOrUpdateRe = regexp.MustCompile(`(?is)^(fix|update)\s*:\s*(.*)$`)
+
+// parseFixOrUpdate recognizes a "fix"/"fix: ..."/"update"/"update: ..."
+// reply. It reports the lowercased mode, the free-text instruction
+// (verbatim casing, empty for bare fix/update), and whether text matched
+// this command family at all. A bare "update" (ok=true, instruction=="")
+// is intentionally still reported as a match -- it's the caller's job to
+// reject it, since only the caller knows how to reply back asking for
+// instructions.
+func parseFixOrUpdate(text string) (mode string, instruction string, ok bool) {
+	lower := strings.ToLower(text)
+	if lower == "fix" {
+		return "fix", "", true
+	}
+	if lower == "update" {
+		return "update", "", true
+	}
+	if m := fixOrUpdateRe.FindStringSubmatchIndex(text); m != nil {
+		mode = strings.ToLower(text[m[2]:m[3]])
+		instruction = strings.TrimSpace(text[m[4]:m[5]])
+		return mode, instruction, true
+	}
+	return "", "", false
+}
+
+// runFix invokes FixScript to apply a fix/update instruction and
+// regenerate + resend a job's tailored resume PDF. The script itself
+// sends the corrected PDF as its own Telegram message (threaded as a
+// reply to replyToMessageID), so runFix only needs to ack immediately
+// (regeneration + LaTeX compile takes a few seconds) and report failure
+// if the script errors.
+//
+// mode is "fix" (full rule-based regen, today's original behavior) or
+// "update" (content-only edit reusing the job's cached base content --
+// see tailor_resume.py's rebuild_one()). instruction is the free-text
+// edit request from a "fix: ..."/"update: ..." reply, or "" for a bare
+// "fix" -- omitted from FixScript's argv entirely when empty, so bare
+// "fix" keeps invoking FixScript exactly as it always has.
+func (s *Syncer) runFix(ctx context.Context, jobID int64, replyToMessageID int64, mode string, instruction string) error {
 	if s.FixScript == "" {
 		return s.TG.Reply(ctx, replyToMessageID, "Resume-fix isn't configured on this install.")
 	}
 
-	if err := s.TG.Reply(ctx, replyToMessageID, "Fixing layout, resending shortly…"); err != nil {
+	ack := "Fixing layout, resending shortly…"
+	if mode == "update" {
+		ack = "Applying edits, resending shortly…"
+	}
+	if err := s.TG.Reply(ctx, replyToMessageID, ack); err != nil {
 		return err
 	}
 
 	fixCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(fixCtx, s.FixScript,
-		strconv.FormatInt(jobID, 10), strconv.FormatInt(replyToMessageID, 10))
+	args := []string{
+		strconv.FormatInt(jobID, 10),
+		strconv.FormatInt(replyToMessageID, 10),
+		mode,
+	}
+	if instruction != "" {
+		args = append(args, instruction)
+	}
+	cmd := exec.CommandContext(fixCtx, s.FixScript, args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		slog.Error("tg-sync: fix script failed", "job_id", jobID, "error", err, "output", string(output))
+		slog.Error("tg-sync: fix script failed", "job_id", jobID, "mode", mode, "error", err, "output", string(output))
 		return s.TG.Reply(ctx, replyToMessageID, fmt.Sprintf("Fix failed for #J%d: %s", jobID, lastLine(string(output))))
 	}
 	return nil

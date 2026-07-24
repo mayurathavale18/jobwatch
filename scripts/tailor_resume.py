@@ -840,9 +840,13 @@ def build_projects_section(focus, jd_keywords):
 
     return "\n\\vspace{6pt}\n\n".join(projects)
 
-def generate_resume(job, jd_data, tight=False):
-    """Generate tailored LaTeX resume as string."""
-    master = load_master_tex()
+def build_resume_fields(job, jd_data, tight=False):
+    """Build the skills/experience/projects content for a tailored resume,
+    without splicing it into master.tex yet. Split out of generate_resume()
+    so rebuild_one() can cache this triple (mode="update" reuses it without
+    re-running the rule-based build) and run instruction-driven LLM edits
+    on it before splicing.
+    """
     jd_text = jd_data.get("content_text", "")
     title = jd_data.get("title") or job["title"]
 
@@ -885,6 +889,15 @@ def generate_resume(job, jd_data, tight=False):
     if extra_skills_line and not tight:
         skills_section = skills_section + "\n" + extra_skills_line
 
+    return skills_section, bullets, projects, focus, jd_keywords
+
+
+def splice_resume_fields(master, skills_section, bullets, projects):
+    """Splice a {skills_section, bullets, projects} triple into master.tex's
+    text, returning the complete document. Pure string surgery -- no
+    generation logic -- so rebuild_one() can call this with either a fresh
+    rule-based triple or an LLM-edited one.
+    """
     # Replace skills section. Lookahead anchors on \section{Experience} only
     # (not the preceding \vspace, whose glue value is a master.tex layout
     # concern and shouldn't be duplicated/hardcoded here).
@@ -919,6 +932,67 @@ def generate_resume(job, jd_data, tight=False):
     new_proj = "\\section{Projects \\& Writing}\n\\resumeItemListStart\n\n" + projects + "\n\n\\resumeItemListEnd"
     master = master[:proj_start] + new_proj + master[proj_list_end:]
 
+    return master
+
+
+def apply_instructions(skills_section, bullets, projects, instructions):
+    """Apply the accumulated fix:/update: reply instructions to an assembled
+    resume triple via one LLM pass. Instructions are trusted verbatim --
+    unlike the automated JD-keyword-injection path, there's no truth-lock
+    filtering here, since these are the user's own explicit edit requests
+    to their own resume. Falls back to the original, unedited triple (and
+    reports ok=False) on any LLM failure so a bad/unavailable LLM call
+    never silently ships an unedited resume as if the edit succeeded --
+    callers must surface that to the user instead of hiding it.
+    """
+    system_prompt = (
+        "You edit a LaTeX resume's Technical Skills, Experience bullets, and "
+        "Projects sections per a list of user instructions, applied in order "
+        "(a later instruction may supersede an earlier one -- resolve exactly "
+        "as a human editor reading the same instructions in order would). "
+        "Apply every instruction verbatim and trust the user -- do not refuse "
+        "or soften a request based on truthfulness. Preserve LaTeX macro "
+        "structure: skills_section must stay a newline-separated list of "
+        "\\techSkill{Category}{comma, separated, items} lines; bullets must "
+        "stay plain text (no LaTeX commands, no backslashes) since the caller "
+        "wraps each one in \\resumeItem{...}; projects must stay plain "
+        "\\resumeItem{...}-ready text. "
+        "Respond with strict JSON only, no markdown fences, no commentary: "
+        '{"skills_section": "...", "bullets": ["...", ...], "projects": "..."}'
+    )
+    user_content = json.dumps({
+        "skills_section": skills_section,
+        "bullets": bullets,
+        "projects": projects,
+        "instructions": instructions,
+    })
+
+    raw = call_opencode(system_prompt, user_content, timeout=30)
+    if raw is None:
+        log("WARN: apply_instructions: call_opencode returned no content, keeping unedited resume")
+        return (skills_section, bullets, projects), False
+
+    try:
+        data = json.loads(raw.strip().strip("`").removeprefix("json").strip())
+        new_skills = data["skills_section"]
+        new_bullets = data["bullets"]
+        new_projects = data["projects"]
+        if not isinstance(new_skills, str) or not isinstance(new_projects, str):
+            raise ValueError("skills_section/projects must be strings")
+        if not isinstance(new_bullets, list) or not new_bullets or not all(isinstance(b, str) for b in new_bullets):
+            raise ValueError("bullets must be a non-empty list of strings")
+    except (json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
+        log(f"WARN: apply_instructions: malformed LLM response ({e}), keeping unedited resume")
+        return (skills_section, bullets, projects), False
+
+    return (new_skills, new_bullets, new_projects), True
+
+
+def generate_resume(job, jd_data, tight=False):
+    """Generate tailored LaTeX resume as string."""
+    master = load_master_tex()
+    skills_section, bullets, projects, focus, jd_keywords = build_resume_fields(job, jd_data, tight=tight)
+    master = splice_resume_fields(master, skills_section, bullets, projects)
     return master, focus, jd_keywords
 
 # -----------------------------------------------------------------------------
@@ -953,7 +1027,8 @@ def get_page_count(pdf_path):
 # Telegram
 # -----------------------------------------------------------------------------
 def send_telegram(pdf_path, company, title, url, score, job_id, reply_to_message_id=None,
-                   judgment=None, hedged_keywords=None, jd_unavailable=False):
+                   judgment=None, hedged_keywords=None, jd_unavailable=False,
+                   instructions_pending=False):
     """Send Telegram notification with PDF document."""
     if not TG_TOKEN or not TG_CHAT:
         return False, "Telegram credentials not configured"
@@ -972,6 +1047,9 @@ def send_telegram(pdf_path, company, title, url, score, job_id, reply_to_message
 
     if judgment and judgment.get("missing_keywords"):
         lines.append(f"Missing: {', '.join(judgment['missing_keywords'][:5])}")
+
+    if instructions_pending:
+        lines.append("\u26a0\ufe0f Edit instructions not applied \u2014 LLM unavailable, reply fix/update again to retry")
 
     if jd_unavailable:
         lines.append("\u26a0\ufe0f JD text unavailable \u2014 coverage/verdict unreliable, resume generated from title only")
@@ -1053,21 +1131,36 @@ def save_tailored(data):
     with open(TAILORED_JSON_PATH, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
-def rebuild_one(job_id, reply_to_message_id=None):
-    """Regenerate one job's tailored resume from scratch against the current
-    master.tex, recompile, verify, and resend. This is the 'fix' Telegram
-    reply command's implementation: it reuses the exact same relevance-scored
-    generation path as the normal batch run (build_experience_bullets /
-    build_projects_section already rank content by JD-focus match), rather
-    than a separate naive-truncation post-processor -- so a "fix" always
-    reflects the latest master.tex layout fixes, not a stale patched-in-place
-    .tex file.
+def rebuild_one(job_id, reply_to_message_id=None, mode="fix", instruction=None):
+    """Regenerate one job's tailored resume, recompile, verify, and resend.
+    This is the 'fix'/'update' Telegram reply commands' implementation.
+
+    mode="fix" always rebuilds the {skills_section, bullets, projects}
+    triple fresh from the rule-based generator (build_resume_fields),
+    exactly like the original bare-"fix" behavior, and refreshes the
+    cached base for future "update" calls. mode="update" reuses the last
+    cached base triple (entry["base_tex_fields"]) instead of rebuilding it
+    -- falling back to a fresh build if no cached base exists yet (a job
+    that's never been through a "fix" cycle).
+
+    Both modes then apply the job's full accumulated instruction list
+    (tailored.json's entry["instructions"], appended to on every non-empty
+    fix:/update: reply) via apply_instructions() before splicing -- always
+    from the same clean base, not chained onto a previous edit's output,
+    to avoid compounding LLM drift across repeated fixes.
     """
     tailored = load_tailored()
     entry = tailored.get(job_id)
     if not entry:
         log(f"ERROR: job {job_id} not found in tracker")
         return False, f"Job {job_id} not found in tracker"
+
+    if instruction:
+        updated_instructions = list(entry.get("instructions") or [])
+        updated_instructions.append(instruction)
+        entry = {**entry, "instructions": updated_instructions}
+        tailored[job_id] = entry
+        save_tailored(tailored)
 
     company = entry.get("company", "Unknown")
     title = entry.get("title", "Unknown")
@@ -1101,13 +1194,39 @@ def rebuild_one(job_id, reply_to_message_id=None):
     final_error = None
     resume_text = ""
     jd_keywords = []
+    instructions_applied = True
+    fresh_base_fields = None  # set only when this attempt built fields fresh (not reused from cache)
+    last_base = None
+    last_edited = None
 
     while attempt < 2 and not success:
         attempt += 1
         tight = (attempt == 2)
         log(f"  Rebuild attempt {attempt} (tight={tight}) for job {job_id}...")
 
-        tex_content, focus, jd_keywords = generate_resume(job, jd_data, tight=tight)
+        use_cache = mode == "update" and bool(entry.get("base_tex_fields"))
+        if use_cache:
+            cached = entry["base_tex_fields"]
+            skills_section, bullets, projects = cached["skills_section"], cached["bullets"], cached["projects"]
+            jd_keywords = extract_keywords(jd_data.get("content_text", ""))
+        else:
+            skills_section, bullets, projects, _focus, jd_keywords = build_resume_fields(job, jd_data, tight=tight)
+            fresh_base_fields = {"skills_section": skills_section, "bullets": bullets, "projects": projects}
+
+        instructions = entry.get("instructions") or []
+        if instructions:
+            base_triple = (skills_section, bullets, projects)
+            if base_triple == last_base:
+                skills_section, bullets, projects = last_edited
+            else:
+                (skills_section, bullets, projects), instructions_applied = apply_instructions(
+                    skills_section, bullets, projects, instructions
+                )
+                last_base = base_triple
+                last_edited = (skills_section, bullets, projects)
+
+        master = load_master_tex()
+        tex_content = splice_resume_fields(master, skills_section, bullets, projects)
         with open(tex_path, "w", encoding="utf-8") as f:
             f.write(tex_content)
 
@@ -1125,6 +1244,11 @@ def rebuild_one(job_id, reply_to_message_id=None):
 
         resume_text = tex_content
         success = True
+
+    if success and fresh_base_fields is not None:
+        entry = {**entry, "base_tex_fields": fresh_base_fields}
+        tailored[job_id] = entry
+        save_tailored(tailored)
 
     if not success:
         log(f"  REBUILD FAILED for job {job_id}: {(final_error or '')[:200]}")
@@ -1151,8 +1275,10 @@ def rebuild_one(job_id, reply_to_message_id=None):
     }
     save_tailored(tailored)
 
+    instructions_pending = bool(entry.get("instructions")) and not instructions_applied
     tg_ok, tg_error = send_telegram(pdf_path, company, title, url, score, job_id,
-                                     reply_to_message_id=reply_to_message_id)
+                                     reply_to_message_id=reply_to_message_id,
+                                     instructions_pending=instructions_pending)
     tailored[job_id]["telegram_error"] = None if tg_ok else tg_error
     save_tailored(tailored)
     if tg_ok:
@@ -1363,14 +1489,38 @@ def main():
     log(f"\n=== Cycle complete ===")
     log(f"Processed: {processed}, Failed: {failed}, Skipped non-eng: {skipped_non_eng}")
 
+
+def _parse_rebuild_cli_args(argv):
+    """Parse the argv following '--rebuild' into (job_id, reply_to, mode,
+    instruction). argv is sys.argv[2:] -- everything after the '--rebuild'
+    token itself. Raises ValueError with a usage message on too few args.
+    """
+    if len(argv) < 2:
+        raise ValueError("--rebuild <job_id> <reply_to_message_id> [--mode fix|update] [--instruction TEXT]")
+    job_id = argv[0]
+    reply_to = argv[1] if argv[1] else None
+    mode = "fix"
+    instruction = None
+    i = 2
+    while i < len(argv):
+        if argv[i] == "--mode" and i + 1 < len(argv):
+            mode = argv[i + 1]
+            i += 2
+        elif argv[i] == "--instruction" and i + 1 < len(argv):
+            instruction = argv[i + 1]
+            i += 2
+        else:
+            i += 1
+    return job_id, reply_to, mode, instruction
+
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "--rebuild":
-        if len(sys.argv) < 3:
-            print("Usage: tailor_resume.py --rebuild <job_id> [reply_to_message_id]", file=sys.stderr)
+        try:
+            _job_id, _reply_to, _mode, _instruction = _parse_rebuild_cli_args(sys.argv[2:])
+        except ValueError as e:
+            print(f"Usage: tailor_resume.py {e}", file=sys.stderr)
             sys.exit(1)
-        _job_id = sys.argv[2]
-        _reply_to = sys.argv[3] if len(sys.argv) > 3 else None
-        _ok, _err = rebuild_one(_job_id, reply_to_message_id=_reply_to)
+        _ok, _err = rebuild_one(_job_id, reply_to_message_id=_reply_to, mode=_mode, instruction=_instruction)
         if not _ok:
             print(f"REBUILD_FAILED: {_err}", file=sys.stderr)
             sys.exit(1)
