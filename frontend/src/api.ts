@@ -26,6 +26,9 @@ export interface JobsResponse {
   totalJobs: number
   lastPoll: PollRun | null
   statuses: string[]
+  page: number
+  pageSize: number
+  totalFiltered: number
 }
 
 export interface CronJobStatus {
@@ -42,6 +45,7 @@ export interface JobFilters {
   status?: string
   company?: string
   q?: string
+  page?: number
 }
 
 export async function fetchJobs(filters: JobFilters): Promise<JobsResponse> {
@@ -49,6 +53,7 @@ export async function fetchJobs(filters: JobFilters): Promise<JobsResponse> {
   if (filters.status) params.set('status', filters.status)
   if (filters.company) params.set('company', filters.company)
   if (filters.q) params.set('q', filters.q)
+  if (filters.page && filters.page > 1) params.set('page', String(filters.page))
   const qs = params.toString()
   const res = await fetch(`/api/jobs${qs ? `?${qs}` : ''}`)
   if (!res.ok) throw new Error(`GET /api/jobs: ${res.status}`)

@@ -1,7 +1,9 @@
 package web
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -11,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"jobwatch/internal/providers"
 	"jobwatch/internal/store"
 )
 
@@ -35,6 +38,63 @@ func TestHandleAPIJobsReturnsInsertedJob(t *testing.T) {
 	}
 	if len(resp.Jobs) != 1 || resp.Jobs[0].Title != "Backend Engineer" {
 		t.Errorf("Jobs = %+v, want one job titled Backend Engineer", resp.Jobs)
+	}
+}
+
+func TestHandleAPIJobsPaginates(t *testing.T) {
+	srv, st := newTestServer(t)
+	ctx := context.Background()
+	for i := 0; i < 30; i++ {
+		job := providers.Job{
+			Provider: "greenhouse", CompanySlug: "stripe", CompanyName: "Stripe",
+			ExternalID: fmt.Sprintf("%d", i), Title: "Backend Engineer", Location: "Remote",
+			URL: fmt.Sprintf("https://example.com/%d", i), FirstSeenAt: time.Now().UTC(), Raw: []byte(`{}`),
+		}
+		tx, err := st.BeginTx(ctx)
+		if err != nil {
+			t.Fatalf("BeginTx: %v", err)
+		}
+		if _, err := st.InsertJob(ctx, tx, job, store.StatusNew); err != nil {
+			t.Fatalf("InsertJob: %v", err)
+		}
+		tx.Commit()
+	}
+
+	// Default page (no ?page param): 25 of 30 jobs, page 1.
+	req := httptest.NewRequest(http.MethodGet, "/api/jobs", nil)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+	var resp apiJobsResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v\nbody: %s", err, w.Body.String())
+	}
+	if resp.Page != 1 || resp.PageSize != 25 || resp.TotalFiltered != 30 || len(resp.Jobs) != 25 {
+		t.Fatalf("page1 resp = %+v, len(Jobs)=%d", resp, len(resp.Jobs))
+	}
+
+	// Page 2: remaining 5 jobs.
+	req = httptest.NewRequest(http.MethodGet, "/api/jobs?page=2", nil)
+	w = httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v\nbody: %s", err, w.Body.String())
+	}
+	if resp.Page != 2 || len(resp.Jobs) != 5 {
+		t.Fatalf("page2 resp = %+v, len(Jobs)=%d", resp, len(resp.Jobs))
+	}
+
+	// Out-of-range page: empty jobs, no error.
+	req = httptest.NewRequest(http.MethodGet, "/api/jobs?page=99", nil)
+	w = httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v\nbody: %s", err, w.Body.String())
+	}
+	if len(resp.Jobs) != 0 {
+		t.Fatalf("out-of-range page Jobs = %+v, want empty", resp.Jobs)
 	}
 }
 

@@ -51,27 +51,45 @@ type apiPollRun struct {
 }
 
 type apiJobsResponse struct {
-	Jobs         []apiJob       `json:"jobs"`
-	Companies    []string       `json:"companies"`
-	StatusCounts map[string]int `json:"statusCounts"`
-	TotalJobs    int            `json:"totalJobs"`
-	LastPoll     *apiPollRun    `json:"lastPoll"`
-	Statuses     []string       `json:"statuses"`
+	Jobs          []apiJob       `json:"jobs"`
+	Companies     []string       `json:"companies"`
+	StatusCounts  map[string]int `json:"statusCounts"`
+	TotalJobs     int            `json:"totalJobs"`
+	LastPoll      *apiPollRun    `json:"lastPoll"`
+	Statuses      []string       `json:"statuses"`
+	Page          int            `json:"page"`
+	PageSize      int            `json:"pageSize"`
+	TotalFiltered int            `json:"totalFiltered"`
 }
+
+const jobsPageSize = 25
 
 func (s *Server) handleAPIJobs(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	q := r.URL.Query()
 
+	page, _ := strconv.Atoi(q.Get("page"))
+	if page < 1 {
+		page = 1
+	}
+
 	filter := store.JobFilter{
 		Status:  q.Get("status"),
 		Company: q.Get("company"),
 		Search:  q.Get("q"),
+		Limit:   jobsPageSize,
+		Offset:  (page - 1) * jobsPageSize,
 	}
 
 	jobs, err := s.store.ListJobs(ctx, filter)
 	if err != nil {
 		httpError(w, "listing jobs", err)
+		return
+	}
+
+	totalFiltered, err := s.store.CountJobs(ctx, filter)
+	if err != nil {
+		httpError(w, "counting filtered jobs", err)
 		return
 	}
 
@@ -115,12 +133,15 @@ func (s *Server) handleAPIJobs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, apiJobsResponse{
-		Jobs:         apiJobs,
-		Companies:    companies,
-		StatusCounts: counts,
-		TotalJobs:    total,
-		LastPoll:     lp,
-		Statuses:     store.ValidStatuses,
+		Jobs:          apiJobs,
+		Companies:     companies,
+		StatusCounts:  counts,
+		TotalJobs:     total,
+		LastPoll:      lp,
+		Statuses:      store.ValidStatuses,
+		Page:          page,
+		PageSize:      jobsPageSize,
+		TotalFiltered: totalFiltered,
 	})
 }
 

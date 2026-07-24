@@ -274,10 +274,13 @@ type JobFilter struct {
 	Status  string // exact match, empty = any
 	Company string // exact match on company_name, empty = any
 	Search  string // substring match on title, empty = any
+	Limit   int    // 0 = unlimited
+	Offset  int
 }
 
-func (s *Store) ListJobs(ctx context.Context, f JobFilter) ([]JobRow, error) {
-	query := `SELECT id, provider, company_slug, company_name, external_id, title, location, url, posted_at, first_seen_at, status, notes, manual_jd_text FROM jobs WHERE 1=1`
+// filterWhere builds the shared WHERE clause + args for ListJobs and CountJobs.
+func filterWhere(f JobFilter) (string, []any) {
+	query := ` WHERE 1=1`
 	var args []any
 
 	if f.Status != "" {
@@ -292,7 +295,17 @@ func (s *Store) ListJobs(ctx context.Context, f JobFilter) ([]JobRow, error) {
 		query += ` AND title LIKE ? ESCAPE '\'`
 		args = append(args, "%"+escapeLike(f.Search)+"%")
 	}
+	return query, args
+}
+
+func (s *Store) ListJobs(ctx context.Context, f JobFilter) ([]JobRow, error) {
+	where, args := filterWhere(f)
+	query := `SELECT id, provider, company_slug, company_name, external_id, title, location, url, posted_at, first_seen_at, status, notes, manual_jd_text FROM jobs` + where
 	query += ` ORDER BY first_seen_at DESC, id DESC`
+	if f.Limit > 0 {
+		query += ` LIMIT ? OFFSET ?`
+		args = append(args, f.Limit, f.Offset)
+	}
 
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -310,6 +323,15 @@ func (s *Store) ListJobs(ctx context.Context, f JobFilter) ([]JobRow, error) {
 		out = append(out, j)
 	}
 	return out, rows.Err()
+}
+
+// CountJobs returns the count of jobs matching f's Status/Company/Search
+// (Limit/Offset ignored), for pagination totals.
+func (s *Store) CountJobs(ctx context.Context, f JobFilter) (int, error) {
+	where, args := filterWhere(f)
+	var n int
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM jobs`+where, args...).Scan(&n)
+	return n, err
 }
 
 func escapeLike(s string) string {

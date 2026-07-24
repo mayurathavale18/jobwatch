@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -239,6 +240,54 @@ func TestListJobsFilters(t *testing.T) {
 	}
 	if len(bySearch) != 1 || bySearch[0].Title != "Frontend Engineer" {
 		t.Errorf("bySearch = %+v", bySearch)
+	}
+}
+
+func TestListJobsPaginationAndCount(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+
+	for i := 0; i < 5; i++ {
+		j := sampleJob()
+		j.ExternalID = fmt.Sprintf("%d", i)
+		j.CompanyName = "Stripe"
+		tx, _ := s.BeginTx(ctx)
+		if _, err := s.InsertJob(ctx, tx, j, StatusNew); err != nil {
+			t.Fatalf("InsertJob: %v", err)
+		}
+		tx.Commit()
+	}
+
+	total, err := s.CountJobs(ctx, JobFilter{})
+	if err != nil {
+		t.Fatalf("CountJobs: %v", err)
+	}
+	if total != 5 {
+		t.Fatalf("CountJobs = %d, want 5", total)
+	}
+
+	page1, err := s.ListJobs(ctx, JobFilter{Limit: 2, Offset: 0})
+	if err != nil {
+		t.Fatalf("ListJobs page1: %v", err)
+	}
+	if len(page1) != 2 {
+		t.Fatalf("page1 len = %d, want 2", len(page1))
+	}
+
+	page3, err := s.ListJobs(ctx, JobFilter{Limit: 2, Offset: 4})
+	if err != nil {
+		t.Fatalf("ListJobs page3: %v", err)
+	}
+	if len(page3) != 1 {
+		t.Fatalf("page3 len = %d, want 1", len(page3))
+	}
+
+	countFiltered, err := s.CountJobs(ctx, JobFilter{Company: "Stripe", Limit: 2})
+	if err != nil {
+		t.Fatalf("CountJobs filtered: %v", err)
+	}
+	if countFiltered != 5 {
+		t.Fatalf("CountJobs filtered = %d, want 5 (Limit must not affect count)", countFiltered)
 	}
 }
 
