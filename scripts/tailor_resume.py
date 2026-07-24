@@ -840,9 +840,13 @@ def build_projects_section(focus, jd_keywords):
 
     return "\n\\vspace{6pt}\n\n".join(projects)
 
-def generate_resume(job, jd_data, tight=False):
-    """Generate tailored LaTeX resume as string."""
-    master = load_master_tex()
+def build_resume_fields(job, jd_data, tight=False):
+    """Build the skills/experience/projects content for a tailored resume,
+    without splicing it into master.tex yet. Split out of generate_resume()
+    so rebuild_one() can cache this triple (mode="update" reuses it without
+    re-running the rule-based build) and run instruction-driven LLM edits
+    on it before splicing.
+    """
     jd_text = jd_data.get("content_text", "")
     title = jd_data.get("title") or job["title"]
 
@@ -885,6 +889,15 @@ def generate_resume(job, jd_data, tight=False):
     if extra_skills_line and not tight:
         skills_section = skills_section + "\n" + extra_skills_line
 
+    return skills_section, bullets, projects, focus, jd_keywords
+
+
+def splice_resume_fields(master, skills_section, bullets, projects):
+    """Splice a {skills_section, bullets, projects} triple into master.tex's
+    text, returning the complete document. Pure string surgery -- no
+    generation logic -- so rebuild_one() can call this with either a fresh
+    rule-based triple or an LLM-edited one.
+    """
     # Replace skills section. Lookahead anchors on \section{Experience} only
     # (not the preceding \vspace, whose glue value is a master.tex layout
     # concern and shouldn't be duplicated/hardcoded here).
@@ -919,6 +932,14 @@ def generate_resume(job, jd_data, tight=False):
     new_proj = "\\section{Projects \\& Writing}\n\\resumeItemListStart\n\n" + projects + "\n\n\\resumeItemListEnd"
     master = master[:proj_start] + new_proj + master[proj_list_end:]
 
+    return master
+
+
+def generate_resume(job, jd_data, tight=False):
+    """Generate tailored LaTeX resume as string."""
+    master = load_master_tex()
+    skills_section, bullets, projects, focus, jd_keywords = build_resume_fields(job, jd_data, tight=tight)
+    master = splice_resume_fields(master, skills_section, bullets, projects)
     return master, focus, jd_keywords
 
 # -----------------------------------------------------------------------------

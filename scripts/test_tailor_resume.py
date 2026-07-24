@@ -423,3 +423,21 @@ def test_send_telegram_caption_flags_jd_unavailable(monkeypatch, tmp_path):
         judgment=None, hedged_keywords=None, jd_unavailable=True,
     )
     assert ok is True
+
+
+def test_build_and_splice_equals_generate_resume():
+    job = {"id": 1, "title": "Backend Engineer", "company_name": "Stripe", "url": "https://stripe.com/jobs/1"}
+    jd_data = {
+        "title": "Backend Engineer", "company_name": "Stripe",
+        "content_text": "We need Go, Kafka, PostgreSQL, and AWS experience.",
+        "content_html": "", "location": "", "absolute_url": "https://stripe.com/jobs/1",
+    }
+
+    want_master, want_focus, want_keywords = tr.generate_resume(job, jd_data, tight=False)
+
+    skills_section, bullets, projects, focus, jd_keywords = tr.build_resume_fields(job, jd_data, tight=False)
+    got_master = tr.splice_resume_fields(tr.load_master_tex(), skills_section, bullets, projects)
+
+    assert got_master == want_master
+    assert focus == want_focus
+    assert jd_keywords == want_keywords
