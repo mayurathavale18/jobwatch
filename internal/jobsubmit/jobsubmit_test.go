@@ -37,7 +37,7 @@ func TestInsertManualJobInsertsNewJob(t *testing.T) {
 	const jobURL = "https://valorem.keka.com/careers/jobdetails/124256"
 	pages := fakePages{titles: map[string]string{jobURL: "Backend Engineer - Valorem"}}
 
-	id, existed, company, title, err := InsertManualJob(ctx, st, jobURL, pages)
+	id, existed, company, title, err := InsertManualJob(ctx, st, jobURL, "", pages)
 	if err != nil {
 		t.Fatalf("InsertManualJob: %v", err)
 	}
@@ -63,18 +63,39 @@ func TestInsertManualJobInsertsNewJob(t *testing.T) {
 	}
 }
 
+func TestInsertManualJobPersistsJDText(t *testing.T) {
+	ctx := context.Background()
+	st := openTestStore(t)
+	const jobURL = "https://valorem.keka.com/careers/jobdetails/124256"
+	pages := fakePages{titles: map[string]string{jobURL: "Backend Engineer"}}
+	const jdText = "We need a backend engineer with Go, Kubernetes, and PostgreSQL experience."
+
+	id, _, _, _, err := InsertManualJob(ctx, st, jobURL, jdText, pages)
+	if err != nil {
+		t.Fatalf("InsertManualJob: %v", err)
+	}
+
+	got, err := st.GetJob(ctx, id)
+	if err != nil {
+		t.Fatalf("GetJob: %v", err)
+	}
+	if got.ManualJDText != jdText {
+		t.Errorf("ManualJDText = %q, want %q", got.ManualJDText, jdText)
+	}
+}
+
 func TestInsertManualJobDuplicateURLIsNoOp(t *testing.T) {
 	ctx := context.Background()
 	st := openTestStore(t)
 	const jobURL = "https://valorem.keka.com/careers/jobdetails/124256"
 	pages := fakePages{titles: map[string]string{jobURL: "Backend Engineer"}}
 
-	id1, _, _, _, err := InsertManualJob(ctx, st, jobURL, pages)
+	id1, _, _, _, err := InsertManualJob(ctx, st, jobURL, "", pages)
 	if err != nil {
 		t.Fatalf("first InsertManualJob: %v", err)
 	}
 
-	id2, existed, _, _, err := InsertManualJob(ctx, st, jobURL, pages)
+	id2, existed, _, _, err := InsertManualJob(ctx, st, jobURL, "", pages)
 	if err != nil {
 		t.Fatalf("second InsertManualJob: %v", err)
 	}
@@ -99,7 +120,7 @@ func TestInsertManualJobTitleFetchFailsStillInserts(t *testing.T) {
 	st := openTestStore(t)
 	const jobURL = "https://wellfound.com/jobs/12345"
 
-	id, existed, _, title, err := InsertManualJob(ctx, st, jobURL, fakePages{err: context.DeadlineExceeded})
+	id, existed, _, title, err := InsertManualJob(ctx, st, jobURL, "", fakePages{err: context.DeadlineExceeded})
 	if err != nil {
 		t.Fatalf("InsertManualJob: %v", err)
 	}
@@ -137,7 +158,7 @@ func TestInsertManualJobCompanyFromURLHandlesCcTLDs(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.wantCompany, func(t *testing.T) {
 			pages := fakePages{titles: map[string]string{tt.url: "Test Job Title"}}
-			_, existed, company, _, err := InsertManualJob(ctx, st, tt.url, pages)
+			_, existed, company, _, err := InsertManualJob(ctx, st, tt.url, "", pages)
 			if err != nil {
 				t.Fatalf("InsertManualJob: %v", err)
 			}
