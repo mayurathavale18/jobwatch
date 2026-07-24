@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/url"
 	"os/exec"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -239,6 +240,34 @@ func ParseStatusKeyword(word string) (string, bool) {
 	default:
 		return "", false
 	}
+}
+
+// fixOrUpdateRe matches a "fix:"/"update:" reply carrying free-text edit
+// instructions -- optional whitespace is allowed on either side of the
+// colon since Mayur's own usage includes "fix : {instructions}".
+var fixOrUpdateRe = regexp.MustCompile(`(?i)^(fix|update)\s*:\s*(.*)$`)
+
+// parseFixOrUpdate recognizes a "fix"/"fix: ..."/"update"/"update: ..."
+// reply. It reports the lowercased mode, the free-text instruction
+// (verbatim casing, empty for bare fix/update), and whether text matched
+// this command family at all. A bare "update" (ok=true, instruction=="")
+// is intentionally still reported as a match -- it's the caller's job to
+// reject it, since only the caller knows how to reply back asking for
+// instructions.
+func parseFixOrUpdate(text string) (mode string, instruction string, ok bool) {
+	lower := strings.ToLower(text)
+	if lower == "fix" {
+		return "fix", "", true
+	}
+	if lower == "update" {
+		return "update", "", true
+	}
+	if m := fixOrUpdateRe.FindStringSubmatchIndex(text); m != nil {
+		mode = strings.ToLower(text[m[2]:m[3]])
+		instruction = strings.TrimSpace(text[m[4]:m[5]])
+		return mode, instruction, true
+	}
+	return "", "", false
 }
 
 // runFix invokes FixScript to regenerate and resend a job's tailored resume

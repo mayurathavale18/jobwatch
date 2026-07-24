@@ -46,6 +46,52 @@ func TestParseStatusKeywordUnknown(t *testing.T) {
 	}
 }
 
+func TestParseFixOrUpdateBareCommands(t *testing.T) {
+	mode, instruction, ok := parseFixOrUpdate("fix")
+	if !ok || mode != "fix" || instruction != "" {
+		t.Errorf("parseFixOrUpdate(fix) = (%q, %q, %v), want (fix, \"\", true)", mode, instruction, ok)
+	}
+
+	mode, instruction, ok = parseFixOrUpdate("UPDATE")
+	if !ok || mode != "update" || instruction != "" {
+		t.Errorf("parseFixOrUpdate(UPDATE) = (%q, %q, %v), want (update, \"\", true)", mode, instruction, ok)
+	}
+}
+
+func TestParseFixOrUpdateWithInstructions(t *testing.T) {
+	cases := []struct {
+		text         string
+		wantMode     string
+		wantInstruct string
+	}{
+		{"fix: reword the top bullet", "fix", "reword the top bullet"},
+		{"fix : reword the top bullet", "fix", "reword the top bullet"},
+		{"UPDATE: Mention Postgres more", "update", "Mention Postgres more"},
+		{"update:   drop the Kafka bullet  ", "update", "drop the Kafka bullet"},
+		{"fix:", "fix", ""},
+	}
+	for _, c := range cases {
+		mode, instruction, ok := parseFixOrUpdate(c.text)
+		if !ok {
+			t.Fatalf("parseFixOrUpdate(%q) ok=false, want true", c.text)
+		}
+		if mode != c.wantMode {
+			t.Errorf("parseFixOrUpdate(%q) mode = %q, want %q", c.text, mode, c.wantMode)
+		}
+		if instruction != c.wantInstruct {
+			t.Errorf("parseFixOrUpdate(%q) instruction = %q, want %q", c.text, instruction, c.wantInstruct)
+		}
+	}
+}
+
+func TestParseFixOrUpdateNoMatch(t *testing.T) {
+	for _, text := range []string{"applied", "note: something", "fixing this myself", "updated the doc", ""} {
+		if _, _, ok := parseFixOrUpdate(text); ok {
+			t.Errorf("parseFixOrUpdate(%q) ok=true, want false", text)
+		}
+	}
+}
+
 func TestAppendNote(t *testing.T) {
 	at := time.Date(2026, 7, 15, 14, 30, 0, 0, time.UTC)
 
