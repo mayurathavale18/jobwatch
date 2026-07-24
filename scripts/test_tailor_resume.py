@@ -267,6 +267,23 @@ def test_apply_instructions_falls_back_on_missing_keys(monkeypatch):
     assert (skills, bullets, projects) == ("orig skills", ["orig bullet"], "orig projects")
 
 
+def test_apply_instructions_strips_markdown_fences(monkeypatch):
+    monkeypatch.setattr(
+        tr, "call_opencode",
+        lambda system_prompt, user_content, **kwargs: "```json\n" + json.dumps({
+            "skills_section": "\\techSkill{Languages}{Go, Python}",
+            "bullets": ["Built a thing."],
+            "projects": "\\resumeItem{A project.}",
+        }) + "\n```",
+    )
+    (skills, bullets, projects), ok = tr.apply_instructions(
+        "\\techSkill{Languages}{Go}", ["Built a thing."], "\\resumeItem{A project.}",
+        ["mention Python too"],
+    )
+    assert ok is True
+    assert skills == "\\techSkill{Languages}{Go, Python}"
+
+
 def test_build_skills_section_lists_jd_matched_keyword_first():
     # Languages is authored as "Go, Python, TypeScript, JavaScript, SQL, Bash" --
     # Python is not first as-authored, so a JD keyword of "python" reordering
@@ -633,6 +650,53 @@ def test_rebuild_one_flags_instructions_pending_when_llm_unavailable(monkeypatch
 
     assert ok is True
     assert sent_kwargs["instructions_pending"] is True
+
+
+def test_rebuild_one_update_mode_does_not_reapply_instructions_on_retry(monkeypatch, tmp_path):
+    tailored_path = tmp_path / "tailored.json"
+    monkeypatch.setattr(tr, "TAILORED_JSON_PATH", tailored_path)
+    db_path = tmp_path / "test.db"
+    _make_empty_jobs_db(db_path)
+    monkeypatch.setattr(tr, "DB_PATH", db_path)
+    monkeypatch.setattr(tr, "OUTPUT_ROOT", tmp_path / "out")
+
+    cached_fields = {
+        "skills_section": "\\techSkill{Languages}{Go}",
+        "bullets": ["Cached bullet."],
+        "projects": "\\resumeItem{Cached project.}",
+    }
+    tr.save_tailored({
+        "1": {
+            "company": "Stripe", "title": "Backend Engineer", "url": "https://stripe.com/jobs/1",
+            "status": "done", "base_tex_fields": cached_fields, "instructions": ["drop the Kafka bullet"],
+        }
+    })
+
+    apply_calls = []
+
+    def fake_apply_instructions(skills, bullets, projects, instructions):
+        apply_calls.append(1)
+        return (skills, bullets, projects), True
+
+    monkeypatch.setattr(tr, "apply_instructions", fake_apply_instructions)
+    monkeypatch.setattr(tr, "splice_resume_fields", lambda master, s, b, p: "MASTER")
+
+    compile_calls = {"n": 0}
+
+    def fake_compile_tex(tex_path):
+        compile_calls["n"] += 1
+        return (compile_calls["n"] >= 2, "")  # fail attempt 1, succeed attempt 2
+
+    monkeypatch.setattr(tr, "compile_tex", fake_compile_tex)
+    monkeypatch.setattr(tr, "get_page_count", lambda pdf_path: 1)
+    monkeypatch.setattr(tr, "score_coverage", lambda keywords, resume_text: (1.0, [], [], []))
+    monkeypatch.setattr(tr, "send_telegram", lambda *a, **kw: (True, None))
+    monkeypatch.setattr(tr, "update_job_status", lambda job_id, status: None)
+
+    ok, err = tr.rebuild_one("1", reply_to_message_id="100", mode="update", instruction=None)
+
+    assert ok is True
+    assert len(apply_calls) == 1  # not re-called on the second (retry) attempt
 
 
 def test_parse_rebuild_cli_args_job_and_reply_only():

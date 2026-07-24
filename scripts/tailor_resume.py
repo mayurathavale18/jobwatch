@@ -973,7 +973,7 @@ def apply_instructions(skills_section, bullets, projects, instructions):
         return (skills_section, bullets, projects), False
 
     try:
-        data = json.loads(raw)
+        data = json.loads(raw.strip().strip("`").removeprefix("json").strip())
         new_skills = data["skills_section"]
         new_bullets = data["bullets"]
         new_projects = data["projects"]
@@ -1196,6 +1196,8 @@ def rebuild_one(job_id, reply_to_message_id=None, mode="fix", instruction=None):
     jd_keywords = []
     instructions_applied = True
     fresh_base_fields = None  # set only when this attempt built fields fresh (not reused from cache)
+    last_base = None
+    last_edited = None
 
     while attempt < 2 and not success:
         attempt += 1
@@ -1213,9 +1215,15 @@ def rebuild_one(job_id, reply_to_message_id=None, mode="fix", instruction=None):
 
         instructions = entry.get("instructions") or []
         if instructions:
-            (skills_section, bullets, projects), instructions_applied = apply_instructions(
-                skills_section, bullets, projects, instructions
-            )
+            base_triple = (skills_section, bullets, projects)
+            if base_triple == last_base:
+                skills_section, bullets, projects = last_edited
+            else:
+                (skills_section, bullets, projects), instructions_applied = apply_instructions(
+                    skills_section, bullets, projects, instructions
+                )
+                last_base = base_triple
+                last_edited = (skills_section, bullets, projects)
 
         master = load_master_tex()
         tex_content = splice_resume_fields(master, skills_section, bullets, projects)
