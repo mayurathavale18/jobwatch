@@ -1,4 +1,5 @@
 """Tests for scripts/tailor_resume.py. Run with: pytest scripts/test_tailor_resume.py -v"""
+import json
 import sys
 from pathlib import Path
 
@@ -212,6 +213,55 @@ def test_llm_judge_falls_back_to_rule_based_on_malformed_json(monkeypatch):
     )
     result = tr.llm_judge("JD text", "resume text", "Backend Engineer", "Acme")
     assert result["source"] == "rule_based"
+
+
+def test_apply_instructions_returns_edited_triple_on_success(monkeypatch):
+    monkeypatch.setattr(
+        tr, "call_opencode",
+        lambda system_prompt, user_content, **kwargs: json.dumps({
+            "skills_section": "\\techSkill{Languages}{Go, Python}",
+            "bullets": ["Built a thing.", "Shipped another thing."],
+            "projects": "\\resumeItem{A project.}",
+        }),
+    )
+    (skills, bullets, projects), ok = tr.apply_instructions(
+        "\\techSkill{Languages}{Go}", ["Built a thing."], "\\resumeItem{A project.}",
+        ["mention Python too"],
+    )
+    assert ok is True
+    assert skills == "\\techSkill{Languages}{Go, Python}"
+    assert bullets == ["Built a thing.", "Shipped another thing."]
+    assert projects == "\\resumeItem{A project.}"
+
+
+def test_apply_instructions_falls_back_on_llm_unavailable(monkeypatch):
+    monkeypatch.setattr(tr, "call_opencode", lambda system_prompt, user_content, **kwargs: None)
+    (skills, bullets, projects), ok = tr.apply_instructions(
+        "orig skills", ["orig bullet"], "orig projects", ["some instruction"],
+    )
+    assert ok is False
+    assert (skills, bullets, projects) == ("orig skills", ["orig bullet"], "orig projects")
+
+
+def test_apply_instructions_falls_back_on_malformed_json(monkeypatch):
+    monkeypatch.setattr(tr, "call_opencode", lambda system_prompt, user_content, **kwargs: "not json")
+    (skills, bullets, projects), ok = tr.apply_instructions(
+        "orig skills", ["orig bullet"], "orig projects", ["some instruction"],
+    )
+    assert ok is False
+    assert (skills, bullets, projects) == ("orig skills", ["orig bullet"], "orig projects")
+
+
+def test_apply_instructions_falls_back_on_missing_keys(monkeypatch):
+    monkeypatch.setattr(
+        tr, "call_opencode",
+        lambda system_prompt, user_content, **kwargs: json.dumps({"skills_section": "x"}),
+    )
+    (skills, bullets, projects), ok = tr.apply_instructions(
+        "orig skills", ["orig bullet"], "orig projects", ["some instruction"],
+    )
+    assert ok is False
+    assert (skills, bullets, projects) == ("orig skills", ["orig bullet"], "orig projects")
 
 
 def test_build_skills_section_lists_jd_matched_keyword_first():

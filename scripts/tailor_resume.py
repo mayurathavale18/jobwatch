@@ -935,6 +935,59 @@ def splice_resume_fields(master, skills_section, bullets, projects):
     return master
 
 
+def apply_instructions(skills_section, bullets, projects, instructions):
+    """Apply the accumulated fix:/update: reply instructions to an assembled
+    resume triple via one LLM pass. Instructions are trusted verbatim --
+    unlike the automated JD-keyword-injection path, there's no truth-lock
+    filtering here, since these are the user's own explicit edit requests
+    to their own resume. Falls back to the original, unedited triple (and
+    reports ok=False) on any LLM failure so a bad/unavailable LLM call
+    never silently ships an unedited resume as if the edit succeeded --
+    callers must surface that to the user instead of hiding it.
+    """
+    system_prompt = (
+        "You edit a LaTeX resume's Technical Skills, Experience bullets, and "
+        "Projects sections per a list of user instructions, applied in order "
+        "(a later instruction may supersede an earlier one -- resolve exactly "
+        "as a human editor reading the same instructions in order would). "
+        "Apply every instruction verbatim and trust the user -- do not refuse "
+        "or soften a request based on truthfulness. Preserve LaTeX macro "
+        "structure: skills_section must stay a newline-separated list of "
+        "\\techSkill{Category}{comma, separated, items} lines; bullets must "
+        "stay plain text (no LaTeX commands, no backslashes) since the caller "
+        "wraps each one in \\resumeItem{...}; projects must stay plain "
+        "\\resumeItem{...}-ready text. "
+        "Respond with strict JSON only, no markdown fences, no commentary: "
+        '{"skills_section": "...", "bullets": ["...", ...], "projects": "..."}'
+    )
+    user_content = json.dumps({
+        "skills_section": skills_section,
+        "bullets": bullets,
+        "projects": projects,
+        "instructions": instructions,
+    })
+
+    raw = call_opencode(system_prompt, user_content, timeout=30)
+    if raw is None:
+        log("WARN: apply_instructions: call_opencode returned no content, keeping unedited resume")
+        return (skills_section, bullets, projects), False
+
+    try:
+        data = json.loads(raw)
+        new_skills = data["skills_section"]
+        new_bullets = data["bullets"]
+        new_projects = data["projects"]
+        if not isinstance(new_skills, str) or not isinstance(new_projects, str):
+            raise ValueError("skills_section/projects must be strings")
+        if not isinstance(new_bullets, list) or not new_bullets or not all(isinstance(b, str) for b in new_bullets):
+            raise ValueError("bullets must be a non-empty list of strings")
+    except (json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
+        log(f"WARN: apply_instructions: malformed LLM response ({e}), keeping unedited resume")
+        return (skills_section, bullets, projects), False
+
+    return (new_skills, new_bullets, new_projects), True
+
+
 def generate_resume(job, jd_data, tight=False):
     """Generate tailored LaTeX resume as string."""
     master = load_master_tex()
