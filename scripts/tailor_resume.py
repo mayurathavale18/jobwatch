@@ -147,6 +147,9 @@ def html_to_jd_text(raw_html):
 # and falls back to the OpenCode Go LLM extraction path (see Task 9).
 MIN_USABLE_JD_CHARS = 150
 
+LEVER_APPLY_RE = re.compile(r'^(https?://jobs\.lever\.co/[^/]+/[0-9a-fA-F-]+)/apply(?:[/?].*)?$')
+
+
 def fetch_jd_generic(url):
     """Fetch full JD text from an arbitrary (non-Greenhouse) job posting
     URL. Tries a free HTML scrape first; if that yields too little usable
@@ -157,6 +160,18 @@ def fetch_jd_generic(url):
     still returns a dict (with whatever text was found), so the caller
     can flag "JD text unavailable" rather than treat it as a fetch error.
     """
+    lever_apply = LEVER_APPLY_RE.match(url)
+    if lever_apply:
+        # Lever's "/apply" URL -- what LinkedIn's "Apply" button links to,
+        # and what users end up pasting -- renders the application form,
+        # not the JD: scraping it grabs form boilerplate ("do you have the
+        # legal right to work...") instead of responsibilities/
+        # requirements. That boilerplate is long enough to clear
+        # MIN_USABLE_JD_CHARS, so it silently poisons is_engineering_role
+        # (the word "legal" trips the non-engineering blocklist) even for
+        # an unambiguous engineering title. The real JD is one URL away.
+        url = lever_apply.group(1)
+
     try:
         req = Request(url, headers={"User-Agent": "jobwatch-resume-tailor/1.0"})
         with urlopen(req, timeout=15) as resp:

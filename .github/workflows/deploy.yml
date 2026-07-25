@@ -30,7 +30,7 @@ jobs:
       - name: Rsync source + built dashboard to server
         run: |
           rsync -az -e "ssh -i ~/.ssh/deploy_key" \
-            internal cmd config.yaml go.mod go.sum \
+            internal cmd scripts config.yaml go.mod go.sum \
             ubuntu@16.113.24.110:/tmp/jobwatch_deploy/
 
       - name: Install, rebuild binary, restart service

@@ -92,6 +92,68 @@ def test_fetch_jd_generic_parses_real_looking_page(monkeypatch):
     assert result["absolute_url"] == "https://valorem.keka.com/careers/jobdetails/124256"
 
 
+def test_fetch_jd_generic_strips_lever_apply_suffix(monkeypatch):
+    # Lever's "/apply" URL (what LinkedIn's "Apply" button links to, and
+    # what jobwatch.mayurathavale.com users end up pasting) renders the
+    # *application form*, not the JD -- scraping it grabs form boilerplate
+    # ("do you have the legal right to work...") instead of responsibilities
+    # /requirements. That boilerplate is long enough to pass the
+    # MIN_USABLE_JD_CHARS check, so it silently poisons is_engineering_role
+    # (the word "legal" trips the non-engineering blocklist) even for an
+    # unambiguous "Backend Engineer" title. Fix: strip "/apply" so the real
+    # JD page -- one URL away -- gets scraped instead.
+    requested_urls = []
+    fake_html = (
+        "<html><body><main><h1>Backend Engineer</h1>"
+        "<p>We are looking for a backend engineer with distributed systems "
+        "and Kubernetes experience to join our platform team immediately.</p>"
+        "</main></body></html>"
+    ).encode("utf-8")
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            return False
+        def read(self):
+            return fake_html
+
+    def fake_urlopen(req, timeout=15):
+        requested_urls.append(req.full_url)
+        return FakeResponse()
+
+    monkeypatch.setattr(tr, "urlopen", fake_urlopen)
+    result = tr.fetch_jd_generic(
+        "https://jobs.lever.co/portcast/1f6381eb-03dd-451a-a8cc-2c862cec3fe3/apply?lever-source=LinkedIn"
+    )
+    assert requested_urls == [
+        "https://jobs.lever.co/portcast/1f6381eb-03dd-451a-a8cc-2c862cec3fe3"
+    ]
+    assert result is not None
+    assert "Backend Engineer" in result["content_text"]
+
+
+def test_fetch_jd_generic_leaves_non_lever_apply_urls_untouched(monkeypatch):
+    requested_urls = []
+    fake_html = b"<html><body><main><p>some content</p></main></body></html>"
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            return False
+        def read(self):
+            return fake_html
+
+    def fake_urlopen(req, timeout=15):
+        requested_urls.append(req.full_url)
+        return FakeResponse()
+
+    monkeypatch.setattr(tr, "urlopen", fake_urlopen)
+    tr.fetch_jd_generic("https://example.com/careers/apply/123")
+    assert requested_urls == ["https://example.com/careers/apply/123"]
+
+
 def test_html_to_jd_text_converts_br_tags_to_newlines():
     html_input = "<p>First line.<br>Second line.<br/>Third line.<br />Fourth line.</p>"
     text = tr.html_to_jd_text(html_input)
