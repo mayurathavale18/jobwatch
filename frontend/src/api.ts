@@ -22,6 +22,7 @@ export interface PollRun {
 export interface JobsResponse {
   jobs: Job[]
   companies: string[]
+  providers: string[]
   statusCounts: Record<string, number>
   totalJobs: number
   lastPoll: PollRun | null
@@ -43,16 +44,20 @@ export interface CronJobStatus {
 
 export interface JobFilters {
   status?: string
+  provider?: string
   company?: string
   q?: string
+  days?: number
   page?: number
 }
 
 export async function fetchJobs(filters: JobFilters): Promise<JobsResponse> {
   const params = new URLSearchParams()
   if (filters.status) params.set('status', filters.status)
+  if (filters.provider) params.set('provider', filters.provider)
   if (filters.company) params.set('company', filters.company)
   if (filters.q) params.set('q', filters.q)
+  if (filters.days) params.set('days', String(filters.days))
   if (filters.page && filters.page > 1) params.set('page', String(filters.page))
   const qs = params.toString()
   const res = await fetch(`/api/jobs${qs ? `?${qs}` : ''}`)
