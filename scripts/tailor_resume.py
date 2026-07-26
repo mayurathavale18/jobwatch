@@ -1127,6 +1127,33 @@ def is_engineering_role(title, jd_text):
     ]
     return any(_contains_word(text, term) for term in eng_terms)
 
+MAX_YEARS_CAP = 3
+
+YEARS_EXPERIENCE_RE = re.compile(
+    r"(\d{1,2})\s*\+?\s*(?:-\s*\d{1,2}\s*)?\+?\s*years?\s*(?:\S+\s+){0,3}exp(?:erience)?\b",
+    re.IGNORECASE,
+)
+
+def max_required_years(jd_text):
+    """Return the highest stated minimum years-of-experience requirement
+    found in jd_text (e.g. "5+ years of experience" -> 5, "3-5 years of
+    experience" -> 3, the lower bound of a range), or None if the text
+    states no such requirement.
+    """
+    matches = YEARS_EXPERIENCE_RE.findall(jd_text or "")
+    if not matches:
+        return None
+    return max(int(m) for m in matches)
+
+def exceeds_experience_cap(jd_text, cap=MAX_YEARS_CAP):
+    """True if jd_text states a minimum years-of-experience requirement
+    greater than cap. False (fail-open) if no requirement is stated,
+    matching how thin/unavailable JDs already fail open elsewhere in
+    process_job.
+    """
+    years = max_required_years(jd_text)
+    return years is not None and years > cap
+
 def load_tailored():
     if TAILORED_JSON_PATH.exists():
         with open(TAILORED_JSON_PATH, "r", encoding="utf-8") as f:
@@ -1373,6 +1400,20 @@ def process_job(job, tailored):
         save_tailored(tailored)
         update_job_status(jid, "ignored")
         return tailored, "skipped_non_eng"
+
+    if exceeds_experience_cap(jd_text):
+        required = max_required_years(jd_text)
+        log(f"SKIPPED (over experience cap): {title} (requires {required}+ years)")
+        tailored[jid] = {
+            "company": company, "title": title, "url": url,
+            "pdf_path": None, "tex_path": None, "coverage_score": None,
+            "status": "ignored",
+            "error": f"Requires {required}+ years experience (cap: {MAX_YEARS_CAP}); skipped per truth lock.",
+            "tailored_date": datetime.now().isoformat(),
+        }
+        save_tailored(tailored)
+        update_job_status(jid, "ignored")
+        return tailored, "skipped_over_experience"
 
     comp_slug = company_slug(company, url)
     title_slug = slugify(title)
