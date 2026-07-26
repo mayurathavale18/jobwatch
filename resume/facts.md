@@ -116,6 +116,7 @@
 ---
 
 # Personal projects (outside work)
+- **CollateralFi** (Solana, Rust/Anchor, Python, LangGraph, FastAPI, Pyth Oracle) — In progress / planned, not yet built: AI-agent-orchestrated DeFi lending protocol. On-chain Solana program (Anchor/Rust) for collateral deposit, stablecoin borrowing, and liquidation execution; LangGraph-based off-chain risk agent reading price-oracle feeds to compute dynamic loan-to-value ratios and trigger liquidations; on-chain payment settlement (SPL token transfers) for loan disbursement/repayment. Do NOT claim as completed/shipped work until actually built.
 - **PR Manager** (Go, GitHub APIs, GitHub Actions): CLI automating PR workflows — reviewer assignment, merge queuing, status checks, cross-platform binary releases via Actions.
 - **Terminal Portfolio** (Go, BubbleTea, Wish, Lipgloss, AWS EC2): SSH-accessible TUI (ssh portfolio.mayurathavale.com), multi-tab navigation, SQLite visitor analytics, live presence tracking; GitHub Actions hot-deploy via SCP + systemd.
 - **Technical writing**: Medium articles on system security, cloud infra, networking incl. self-hosted VPN tunneling on AWS.
