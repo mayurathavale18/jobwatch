@@ -75,7 +75,7 @@ func (c *Config) validate() error {
 	}
 	validProviders := map[string]bool{
 		"greenhouse": true, "lever": true, "ashby": true, "workday": true,
-		"remoteok": true, "wwr": true,
+		"remoteok": true, "wwr": true, "web3career": true,
 	}
 	for i, co := range c.Companies {
 		if co.Name == "" {
@@ -86,7 +86,7 @@ func (c *Config) validate() error {
 		}
 		provider := strings.ToLower(co.Provider)
 		if !validProviders[provider] {
-			return fmt.Errorf("companies[%d] (%s): unsupported provider %q (want greenhouse, lever, ashby, workday, remoteok, or wwr)", i, co.Name, co.Provider)
+			return fmt.Errorf("companies[%d] (%s): unsupported provider %q (want greenhouse, lever, ashby, workday, remoteok, wwr, or web3career)", i, co.Name, co.Provider)
 		}
 		if provider == "workday" && (co.Host == "" || co.Site == "") {
 			return fmt.Errorf("companies[%d] (%s): workday requires host and site", i, co.Name)
