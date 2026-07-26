@@ -10,7 +10,7 @@ import (
 func TestPasses(t *testing.T) {
 	filters := config.Filters{
 		IncludeKeywords:  []string{"backend", "software engineer", "sde", "platform", "golang", "python"},
-		ExcludeKeywords:  []string{"staff", "principal", "director", "manager", "intern", "10+ years"},
+		ExcludeKeywords:  []string{"staff", "principal", "director", "manager", "intern", "10+ years", "lead"},
 		LocationsInclude: []string{"india", "hyderabad", "bengaluru", "bangalore", "remote"},
 	}
 
@@ -28,6 +28,9 @@ func TestPasses(t *testing.T) {
 		{"location not allowed", "Backend Engineer", "London, UK", false},
 		{"case insensitive include", "BACKEND ENGINEER", "INDIA", true},
 		{"case insensitive exclude", "STAFF Engineer", "India", false},
+		{"excluded by lead as whole word", "Team Lead, Backend Engineer", "Remote", false},
+		{"not excluded: intern substring inside international", "International Backend Engineer", "Remote", true},
+		{"not excluded: lead substring inside leadership", "Leadership Program Backend Engineer", "Remote", true},
 	}
 
 	for _, tt := range tests {
