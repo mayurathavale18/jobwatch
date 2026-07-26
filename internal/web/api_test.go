@@ -98,6 +98,74 @@ func TestHandleAPIJobsPaginates(t *testing.T) {
 	}
 }
 
+func TestHandleAPIJobsFiltersByProviderStatusesAndDays(t *testing.T) {
+	srv, st := newTestServer(t)
+	ctx := context.Background()
+
+	old := providers.Job{
+		Provider: "web3career", CompanySlug: "old-chain", CompanyName: "Old Chain",
+		ExternalID: "old", Title: "Backend Engineer", Location: "Remote",
+		URL: "https://example.com/old", FirstSeenAt: time.Now().UTC().Add(-10 * 24 * time.Hour), Raw: []byte(`{}`),
+	}
+	recent := providers.Job{
+		Provider: "greenhouse", CompanySlug: "brex", CompanyName: "Brex",
+		ExternalID: "recent", Title: "Backend Engineer", Location: "Remote",
+		URL: "https://example.com/recent", FirstSeenAt: time.Now().UTC(), Raw: []byte(`{}`),
+	}
+
+	for i, j := range []providers.Job{old, recent} {
+		tx, err := st.BeginTx(ctx)
+		if err != nil {
+			t.Fatalf("BeginTx: %v", err)
+		}
+		status := store.StatusNew
+		if i == 0 {
+			status = store.StatusShortlisted
+		}
+		if _, err := st.InsertJob(ctx, tx, j, status); err != nil {
+			t.Fatalf("InsertJob: %v", err)
+		}
+		tx.Commit()
+	}
+
+	// Provider filter.
+	req := httptest.NewRequest(http.MethodGet, "/api/jobs?provider=web3career", nil)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+	var resp apiJobsResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.TotalFiltered != 1 || len(resp.Jobs) != 1 || resp.Jobs[0].CompanyName != "Old Chain" {
+		t.Fatalf("provider filter resp = %+v", resp)
+	}
+	if len(resp.Providers) != 2 {
+		t.Errorf("Providers = %v, want 2 distinct providers regardless of active filter", resp.Providers)
+	}
+
+	// Multi-status filter (comma-separated).
+	req = httptest.NewRequest(http.MethodGet, "/api/jobs?status=new,shortlisted", nil)
+	w = httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.TotalFiltered != 2 {
+		t.Fatalf("multi-status resp = %+v, want both jobs (new + shortlisted)", resp)
+	}
+
+	// Days filter: only the recent job falls within the last 1 day.
+	req = httptest.NewRequest(http.MethodGet, "/api/jobs?days=1", nil)
+	w = httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.TotalFiltered != 1 || len(resp.Jobs) != 1 || resp.Jobs[0].CompanyName != "Brex" {
+		t.Fatalf("days filter resp = %+v", resp)
+	}
+}
+
 func TestHandleAPIPatchJobUpdatesStatusAndNotes(t *testing.T) {
 	srv, st := newTestServer(t)
 	id := insertTestJob(t, st)

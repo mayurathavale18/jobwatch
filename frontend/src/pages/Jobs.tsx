@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react'
 import { fetchJobs, patchJob, submitManualJob, type JobsResponse } from '../api'
 
-function filtersFromLocation(): { status: string; company: string; q: string } {
+function filtersFromLocation(): { status: string; provider: string; company: string; q: string; days: number } {
   const params = new URLSearchParams(window.location.search)
   return {
     status: params.get('status') ?? '',
+    provider: params.get('provider') ?? '',
     company: params.get('company') ?? '',
     q: params.get('q') ?? '',
+    days: Number(params.get('days')) || 0,
   }
 }
 
@@ -76,8 +78,10 @@ export default function Jobs() {
   useEffect(() => {
     const params = new URLSearchParams()
     if (filters.status) params.set('status', filters.status)
+    if (filters.provider) params.set('provider', filters.provider)
     if (filters.company) params.set('company', filters.company)
     if (filters.q) params.set('q', filters.q)
+    if (filters.days) params.set('days', String(filters.days))
     if (page > 1) params.set('page', String(page))
     const qs = params.toString()
     window.history.replaceState(null, '', qs ? `/?${qs}` : '/')
@@ -85,9 +89,17 @@ export default function Jobs() {
     fetchJobs({ ...filters, page }).then(setData).catch(console.error)
   }, [filters, page])
 
-  function updateFilters(patch: Partial<{ status: string; company: string; q: string }>) {
+  function updateFilters(patch: Partial<{ status: string; provider: string; company: string; q: string; days: number }>) {
     setFilters((f) => ({ ...f, ...patch }))
     setPage(1)
+  }
+
+  function toggleStatus(status: string) {
+    const current = filters.status ? filters.status.split(',') : []
+    const next = current.includes(status)
+      ? current.filter((s) => s !== status)
+      : [...current, status]
+    updateFilters({ status: next.join(',') })
   }
 
   async function updateStatus(id: number, status: string) {
@@ -152,14 +164,29 @@ export default function Jobs() {
       </div>
 
       <div className="filters">
+        <div className="status-pills">
+          {data.statuses.map((s) => {
+            const active = filters.status.split(',').includes(s)
+            return (
+              <button
+                key={s}
+                type="button"
+                className={`status-pill${active ? ' active' : ''}`}
+                onClick={() => toggleStatus(s)}
+              >
+                {s}
+              </button>
+            )
+          })}
+        </div>
         <select
-          value={filters.status}
-          onChange={(e) => updateFilters({ status: e.target.value })}
+          value={filters.provider}
+          onChange={(e) => updateFilters({ provider: e.target.value })}
         >
-          <option value="">All statuses</option>
-          {data.statuses.map((s) => (
-            <option key={s} value={s}>
-              {s}
+          <option value="">All providers</option>
+          {data.providers.map((p) => (
+            <option key={p} value={p}>
+              {p}
             </option>
           ))}
         </select>
@@ -174,9 +201,18 @@ export default function Jobs() {
             </option>
           ))}
         </select>
+        <select
+          value={String(filters.days)}
+          onChange={(e) => updateFilters({ days: Number(e.target.value) })}
+        >
+          <option value="0">All time</option>
+          <option value="1">Last 24h</option>
+          <option value="7">Last 7 days</option>
+          <option value="30">Last 30 days</option>
+        </select>
         <input
           type="text"
-          placeholder="Search title..."
+          placeholder="Search title, company, location..."
           value={filters.q}
           onChange={(e) => updateFilters({ q: e.target.value })}
         />

@@ -271,11 +271,13 @@ type JobRow struct {
 
 // JobFilter narrows ListJobs results.
 type JobFilter struct {
-	Status  string // exact match, empty = any
-	Company string // exact match on company_name, empty = any
-	Search  string // substring match on title, empty = any
-	Limit   int    // 0 = unlimited
-	Offset  int
+	Statuses []string // exact match, any of; empty = any status
+	Provider string   // exact match, empty = any
+	Company  string   // exact match on company_name, empty = any
+	Search   string   // substring match across title/company_name/location, empty = any
+	Since    string   // RFC3339; first_seen_at >= Since. Empty = no lower bound.
+	Limit    int      // 0 = unlimited
+	Offset   int
 }
 
 // filterWhere builds the shared WHERE clause + args for ListJobs and CountJobs.
@@ -283,17 +285,30 @@ func filterWhere(f JobFilter) (string, []any) {
 	query := ` WHERE 1=1`
 	var args []any
 
-	if f.Status != "" {
-		query += ` AND status = ?`
-		args = append(args, f.Status)
+	if len(f.Statuses) > 0 {
+		placeholders := strings.Repeat("?,", len(f.Statuses))
+		placeholders = placeholders[:len(placeholders)-1]
+		query += ` AND status IN (` + placeholders + `)`
+		for _, s := range f.Statuses {
+			args = append(args, s)
+		}
+	}
+	if f.Provider != "" {
+		query += ` AND provider = ?`
+		args = append(args, f.Provider)
 	}
 	if f.Company != "" {
 		query += ` AND company_name = ?`
 		args = append(args, f.Company)
 	}
 	if f.Search != "" {
-		query += ` AND title LIKE ? ESCAPE '\'`
-		args = append(args, "%"+escapeLike(f.Search)+"%")
+		query += ` AND (title LIKE ? ESCAPE '\' OR company_name LIKE ? ESCAPE '\' OR location LIKE ? ESCAPE '\')`
+		like := "%" + escapeLike(f.Search) + "%"
+		args = append(args, like, like, like)
+	}
+	if f.Since != "" {
+		query += ` AND first_seen_at >= ?`
+		args = append(args, f.Since)
 	}
 	return query, args
 }
@@ -385,6 +400,26 @@ func (s *Store) StatusCounts(ctx context.Context) (map[string]int, error) {
 // for populating the dashboard filter bar.
 func (s *Store) CompanyNames(ctx context.Context) ([]string, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT company_name FROM jobs ORDER BY company_name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		out = append(out, name)
+	}
+	return out, rows.Err()
+}
+
+// Providers returns the distinct set of provider names present in jobs,
+// for populating the dashboard filter bar.
+func (s *Store) Providers(ctx context.Context) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT provider FROM jobs ORDER BY provider`)
 	if err != nil {
 		return nil, err
 	}
