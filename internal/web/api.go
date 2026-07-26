@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"jobwatch/internal/jobsubmit"
 	"jobwatch/internal/store"
@@ -53,6 +54,7 @@ type apiPollRun struct {
 type apiJobsResponse struct {
 	Jobs          []apiJob       `json:"jobs"`
 	Companies     []string       `json:"companies"`
+	Providers     []string       `json:"providers"`
 	StatusCounts  map[string]int `json:"statusCounts"`
 	TotalJobs     int            `json:"totalJobs"`
 	LastPoll      *apiPollRun    `json:"lastPoll"`
@@ -74,11 +76,17 @@ func (s *Server) handleAPIJobs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	filter := store.JobFilter{
-		Status:  q.Get("status"),
-		Company: q.Get("company"),
-		Search:  q.Get("q"),
-		Limit:   jobsPageSize,
-		Offset:  (page - 1) * jobsPageSize,
+		Provider: q.Get("provider"),
+		Company:  q.Get("company"),
+		Search:   q.Get("q"),
+		Limit:    jobsPageSize,
+		Offset:   (page - 1) * jobsPageSize,
+	}
+	if statusParam := q.Get("status"); statusParam != "" {
+		filter.Statuses = strings.Split(statusParam, ",")
+	}
+	if days, err := strconv.Atoi(q.Get("days")); err == nil && days > 0 {
+		filter.Since = time.Now().UTC().Add(-time.Duration(days) * 24 * time.Hour).Format(time.RFC3339)
 	}
 
 	jobs, err := s.store.ListJobs(ctx, filter)
@@ -96,6 +104,12 @@ func (s *Server) handleAPIJobs(w http.ResponseWriter, r *http.Request) {
 	companies, err := s.store.CompanyNames(ctx)
 	if err != nil {
 		httpError(w, "listing companies", err)
+		return
+	}
+
+	providersList, err := s.store.Providers(ctx)
+	if err != nil {
+		httpError(w, "listing providers", err)
 		return
 	}
 
@@ -135,6 +149,7 @@ func (s *Server) handleAPIJobs(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, apiJobsResponse{
 		Jobs:          apiJobs,
 		Companies:     companies,
+		Providers:     providersList,
 		StatusCounts:  counts,
 		TotalJobs:     total,
 		LastPoll:      lp,
