@@ -489,6 +489,71 @@ def test_process_job_skips_non_engineering_role(monkeypatch, tmp_path):
     assert tailored["1"]["status"] == "ignored"
 
 
+def test_is_engineering_role_hr_hack_no_longer_needed():
+    # "hr " (with a trailing space) was a hand-rolled workaround to avoid
+    # matching inside unrelated words like "Chrome" -- confirm the
+    # word-boundary version still correctly allows such titles.
+    assert tr.is_engineering_role("Chrome Extension Engineer", "") is True
+
+
+def test_is_engineering_role_still_blocks_hr_titles():
+    assert tr.is_engineering_role("HR Business Partner", "") is False
+
+
+def test_is_engineering_role_still_blocks_legal_titles():
+    assert tr.is_engineering_role("Corporate Counsel", "") is False
+
+
+def test_max_required_years_plus_pattern():
+    assert tr.max_required_years("5+ years of experience required") == 5
+
+
+def test_max_required_years_range_pattern_uses_lower_bound():
+    assert tr.max_required_years("3-5 years of experience") == 3
+
+
+def test_max_required_years_no_requirement_stated():
+    assert tr.max_required_years("Great team, fast-paced environment.") is None
+
+
+def test_max_required_years_picks_highest_stated_minimum():
+    text = "2+ years with Python. 6+ years of overall professional experience."
+    assert tr.max_required_years(text) == 6
+
+
+def test_exceeds_experience_cap_true_above_cap():
+    assert tr.exceeds_experience_cap("Requires 5+ years of experience.") is True
+
+
+def test_exceeds_experience_cap_false_at_cap():
+    assert tr.exceeds_experience_cap("Requires 3+ years of experience.") is False
+
+
+def test_exceeds_experience_cap_false_when_unstated():
+    assert tr.exceeds_experience_cap("Backend Engineer role.") is False
+
+
+def test_process_job_skips_over_experience_role(monkeypatch, tmp_path):
+    monkeypatch.setattr(tr, "TAILORED_JSON_PATH", tmp_path / "tailored.json")
+    monkeypatch.setattr(tr, "fetch_greenhouse_job", lambda slug, gh_id: None)
+    monkeypatch.setattr(
+        tr, "fetch_jd_generic",
+        lambda url: {
+            "title": "", "company_name": "",
+            "content_text": (
+                "Backend Engineer role. We are looking for a strong software "
+                "engineer to join our platform team. Requires 6+ years of "
+                "professional experience building distributed systems at scale."
+            ),
+            "content_html": "", "location": "", "absolute_url": url,
+        },
+    )
+    job = {"id": 3, "company_name": "Acme", "title": "Backend Engineer", "url": "https://example.com/3"}
+    tailored, outcome = tr.process_job(job, {})
+    assert outcome == "skipped_over_experience"
+    assert tailored["3"]["status"] == "ignored"
+
+
 def test_process_job_marks_failed_when_compile_fails(monkeypatch, tmp_path):
     monkeypatch.setattr(tr, "TAILORED_JSON_PATH", tmp_path / "tailored.json")
     monkeypatch.setattr(tr, "OUTPUT_ROOT", tmp_path / "output")

@@ -1095,6 +1095,14 @@ def send_telegram(pdf_path, company, title, url, score, job_id, reply_to_message
 # -----------------------------------------------------------------------------
 # Main processing
 # -----------------------------------------------------------------------------
+def _contains_word(text, phrase):
+    """Whole-word/whole-phrase substring check, \\b-bounded so a short
+    phrase (e.g. "hr") doesn't match inside an unrelated longer word
+    (e.g. "hr" inside "Chrome"). Callers pass already-lowercased text.
+    """
+    return re.search(r'\b' + re.escape(phrase) + r'\b', text) is not None
+
+
 def is_engineering_role(title, jd_text):
     """Skip clearly non-engineering roles that violate truth lock."""
     text = (title + " " + jd_text).lower()
@@ -1102,12 +1110,12 @@ def is_engineering_role(title, jd_text):
         "account executive", "sales executive", "business development",
         "cloud billing associate", "billing operations", "billing analyst",
         "lead, cloud billing operations", "senior lead, cloud billing",
-        "recruiter", "hr ", "human resources", "marketing", "finance manager",
+        "recruiter", "hr", "human resources", "marketing", "finance manager",
         "accountant", "bookkeeper", "legal", "counsel", "paralegal",
         "office manager", "administrative", "executive assistant"
     ]
     for term in non_eng:
-        if term in text:
+        if _contains_word(text, term):
             return False
     # Must contain an engineering keyword
     eng_terms = [
@@ -1117,7 +1125,34 @@ def is_engineering_role(title, jd_text):
         "infrastructure", "platform", "solutions engineer", "solutions architect",
         "forward deployed", "technical solutions", "systems engineer"
     ]
-    return any(term in text for term in eng_terms)
+    return any(_contains_word(text, term) for term in eng_terms)
+
+MAX_YEARS_CAP = 3
+
+YEARS_EXPERIENCE_RE = re.compile(
+    r"(\d{1,2})\s*\+?\s*(?:-\s*\d{1,2}\s*)?\+?\s*years?\s*(?:\S+\s+){0,3}exp(?:erience)?\b",
+    re.IGNORECASE,
+)
+
+def max_required_years(jd_text):
+    """Return the highest stated minimum years-of-experience requirement
+    found in jd_text (e.g. "5+ years of experience" -> 5, "3-5 years of
+    experience" -> 3, the lower bound of a range), or None if the text
+    states no such requirement.
+    """
+    matches = YEARS_EXPERIENCE_RE.findall(jd_text or "")
+    if not matches:
+        return None
+    return max(int(m) for m in matches)
+
+def exceeds_experience_cap(jd_text, cap=MAX_YEARS_CAP):
+    """True if jd_text states a minimum years-of-experience requirement
+    greater than cap. False (fail-open) if no requirement is stated,
+    matching how thin/unavailable JDs already fail open elsewhere in
+    process_job.
+    """
+    years = max_required_years(jd_text)
+    return years is not None and years > cap
 
 def load_tailored():
     if TAILORED_JSON_PATH.exists():
@@ -1365,6 +1400,20 @@ def process_job(job, tailored):
         save_tailored(tailored)
         update_job_status(jid, "ignored")
         return tailored, "skipped_non_eng"
+
+    if exceeds_experience_cap(jd_text):
+        required = max_required_years(jd_text)
+        log(f"SKIPPED (over experience cap): {title} (requires {required}+ years)")
+        tailored[jid] = {
+            "company": company, "title": title, "url": url,
+            "pdf_path": None, "tex_path": None, "coverage_score": None,
+            "status": "ignored",
+            "error": f"Requires {required}+ years experience (cap: {MAX_YEARS_CAP}); skipped per truth lock.",
+            "tailored_date": datetime.now().isoformat(),
+        }
+        save_tailored(tailored)
+        update_job_status(jid, "ignored")
+        return tailored, "skipped_over_experience"
 
     comp_slug = company_slug(company, url)
     title_slug = slugify(title)
