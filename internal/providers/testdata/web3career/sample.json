@@ -1,0 +1,55 @@
+[
+  "Web3 Jobs API https://web3.career\nURL params:\nremote=true (show only remote jobs),\nlimit=100 ...\nAPI Terms of Service: Please link back using apply_url (with follow, and without nofollow!) and mention web3.career as a source, so we get traffic back from your site. If you do not we'll have to suspend API access.",
+  [
+    {
+      "id": 151862,
+      "date": "Sat, 25 Jul 2026 06:46:26 +0100",
+      "date_epoch": 1784958386,
+      "is_remote": false,
+      "country": "india",
+      "city": "bengaluru",
+      "title": "Backend Engineer",
+      "company": "Acme Chain",
+      "location": " KA Bengaluru IN",
+      "apply_url": "https://web3.career/r/aaaa1111",
+      "tags": ["backend", "solidity"]
+    },
+    {
+      "id": 151863,
+      "date": "Sat, 25 Jul 2026 06:46:26 +0100",
+      "date_epoch": 1784958400,
+      "is_remote": true,
+      "country": "united-states",
+      "city": "san-francisco",
+      "title": "Smart Contract Engineer",
+      "company": "Widget DAO",
+      "location": " CA San Francisco US",
+      "apply_url": "https://web3.career/r/bbbb2222",
+      "tags": ["solidity", "rust"]
+    },
+    {
+      "id": 151864,
+      "date": "Sat, 25 Jul 2026 06:46:26 +0100",
+      "date_epoch": 1784958420,
+      "is_remote": true,
+      "country": "remote",
+      "city": "remote",
+      "title": "Full Stack Engineer",
+      "company": "Chain Labs",
+      "location": "Remote",
+      "apply_url": "https://web3.career/r/cccc3333",
+      "tags": ["fullstack"]
+    },
+    {
+      "id": 0,
+      "date": "Sat, 25 Jul 2026 06:46:26 +0100",
+      "date_epoch": 1784958430,
+      "is_remote": false,
+      "title": "Malformed Entry",
+      "company": "Nobody",
+      "location": "",
+      "apply_url": "",
+      "tags": []
+    }
+  ]
+]

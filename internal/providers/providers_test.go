@@ -237,6 +237,55 @@ func TestParseWeWorkRemotely(t *testing.T) {
 	}
 }
 
+func TestParseWeb3Career(t *testing.T) {
+	data := readFixture(t, "testdata/web3career/sample.json")
+
+	jobs, err := parseWeb3CareerJSON(data)
+	if err != nil {
+		t.Fatalf("parseWeb3CareerJSON: %v", err)
+	}
+	if len(jobs) != 3 {
+		t.Fatalf("expected 3 jobs (malformed entry with empty apply_url and id=0 skipped), got %d", len(jobs))
+	}
+
+	j := jobs[0]
+	if j.Provider != "web3career" {
+		t.Errorf("Provider = %q, want web3career", j.Provider)
+	}
+	if j.CompanySlug != "acme-chain" || j.CompanyName != "Acme Chain" {
+		t.Errorf("company fields wrong: slug=%q name=%q", j.CompanySlug, j.CompanyName)
+	}
+	if j.ExternalID != "151862" {
+		t.Errorf("ExternalID = %q, want 151862", j.ExternalID)
+	}
+	if j.Title != "Backend Engineer" {
+		t.Errorf("Title = %q", j.Title)
+	}
+	if j.URL != "https://web3.career/r/aaaa1111" {
+		t.Errorf("URL = %q, want apply_url verbatim", j.URL)
+	}
+	if j.Location != " KA Bengaluru IN" {
+		t.Errorf("Location = %q, want unmodified (is_remote=false)", j.Location)
+	}
+	if j.PostedAt == nil || j.PostedAt.Unix() != 1784958386 {
+		t.Errorf("PostedAt = %v, want parsed from date_epoch 1784958386", j.PostedAt)
+	}
+
+	// is_remote=true but location text doesn't say "remote" -- must be
+	// appended so the existing locations_include filter catches it.
+	j2 := jobs[1]
+	if j2.Location != " CA San Francisco US (Remote)" {
+		t.Errorf("Location = %q, want \"(Remote)\" appended for is_remote job with non-remote-sounding location text", j2.Location)
+	}
+
+	// is_remote=true and location text already says "Remote" -- must not
+	// be double-appended.
+	j3 := jobs[2]
+	if j3.Location != "Remote" {
+		t.Errorf("Location = %q, want unchanged (already says Remote)", j3.Location)
+	}
+}
+
 func TestSlugify(t *testing.T) {
 	cases := map[string]string{
 		"Acme Corp":     "acme-corp",
