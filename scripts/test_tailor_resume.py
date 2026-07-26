@@ -489,6 +489,21 @@ def test_process_job_skips_non_engineering_role(monkeypatch, tmp_path):
     assert tailored["1"]["status"] == "ignored"
 
 
+def test_is_engineering_role_hr_hack_no_longer_needed():
+    # "hr " (with a trailing space) was a hand-rolled workaround to avoid
+    # matching inside unrelated words like "Chrome" -- confirm the
+    # word-boundary version still correctly allows such titles.
+    assert tr.is_engineering_role("Chrome Extension Engineer", "") is True
+
+
+def test_is_engineering_role_still_blocks_hr_titles():
+    assert tr.is_engineering_role("HR Business Partner", "") is False
+
+
+def test_is_engineering_role_still_blocks_legal_titles():
+    assert tr.is_engineering_role("Corporate Counsel", "") is False
+
+
 def test_process_job_marks_failed_when_compile_fails(monkeypatch, tmp_path):
     monkeypatch.setattr(tr, "TAILORED_JSON_PATH", tmp_path / "tailored.json")
     monkeypatch.setattr(tr, "OUTPUT_ROOT", tmp_path / "output")

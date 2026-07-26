@@ -1095,6 +1095,14 @@ def send_telegram(pdf_path, company, title, url, score, job_id, reply_to_message
 # -----------------------------------------------------------------------------
 # Main processing
 # -----------------------------------------------------------------------------
+def _contains_word(text, phrase):
+    """Whole-word/whole-phrase substring check, \\b-bounded so a short
+    phrase (e.g. "hr") doesn't match inside an unrelated longer word
+    (e.g. "hr" inside "Chrome"). Callers pass already-lowercased text.
+    """
+    return re.search(r'\b' + re.escape(phrase) + r'\b', text) is not None
+
+
 def is_engineering_role(title, jd_text):
     """Skip clearly non-engineering roles that violate truth lock."""
     text = (title + " " + jd_text).lower()
@@ -1102,12 +1110,12 @@ def is_engineering_role(title, jd_text):
         "account executive", "sales executive", "business development",
         "cloud billing associate", "billing operations", "billing analyst",
         "lead, cloud billing operations", "senior lead, cloud billing",
-        "recruiter", "hr ", "human resources", "marketing", "finance manager",
+        "recruiter", "hr", "human resources", "marketing", "finance manager",
         "accountant", "bookkeeper", "legal", "counsel", "paralegal",
         "office manager", "administrative", "executive assistant"
     ]
     for term in non_eng:
-        if term in text:
+        if _contains_word(text, term):
             return False
     # Must contain an engineering keyword
     eng_terms = [
@@ -1117,7 +1125,7 @@ def is_engineering_role(title, jd_text):
         "infrastructure", "platform", "solutions engineer", "solutions architect",
         "forward deployed", "technical solutions", "systems engineer"
     ]
-    return any(term in text for term in eng_terms)
+    return any(_contains_word(text, term) for term in eng_terms)
 
 def load_tailored():
     if TAILORED_JSON_PATH.exists():
