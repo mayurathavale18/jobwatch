@@ -58,6 +58,15 @@ OPENCODE_API_KEY = os.environ.get("OPENCODE_API_KEY", "")
 OPENCODE_BASE_URL = "https://opencode.ai/zen/go/v1"
 DEFAULT_OPENCODE_MODEL = "deepseek-v4-pro"
 
+# Apollo.io: used only for the founder-outreach feature's employee-count
+# and named-founder-email lookup -- company NAME search only (no domain
+# resolution attempted; Greenhouse/Ashby postings live on the ATS's own
+# domain, not the company's, so a reliable domain isn't always derivable).
+APOLLO_API_KEY = os.environ.get("APOLLO_API_KEY", "")
+APOLLO_BASE_URL = "https://api.apollo.io/v1"
+FOUNDER_TITLES = ["founder", "co-founder", "cofounder", "chief executive officer", "ceo"]
+MAX_OUTREACH_EMPLOYEES = 20
+
 # -----------------------------------------------------------------------------
 # Logging helpers
 # -----------------------------------------------------------------------------
@@ -239,6 +248,82 @@ def call_opencode(system_prompt, user_content, model=DEFAULT_OPENCODE_MODEL, tim
     except Exception as e:
         log(f"WARN: OpenCode call failed: {e}")
         return None
+
+
+def _apollo_post(path, payload, timeout=15):
+    """POST to one Apollo.io v1 endpoint. Returns the parsed JSON body, or
+    None on any failure (missing key, timeout, non-200, malformed JSON) --
+    callers always treat None as a miss, never crash.
+    """
+    if not APOLLO_API_KEY:
+        return None
+    body = json.dumps(payload).encode("utf-8")
+    try:
+        req = Request(
+            f"{APOLLO_BASE_URL}{path}",
+            data=body,
+            method="POST",
+            headers={
+                "x-api-key": APOLLO_API_KEY,
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "User-Agent": "jobwatch-outreach/1.0",
+            },
+        )
+        with urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except Exception as e:
+        log(f"WARN: Apollo API call to {path} failed: {e}")
+        return None
+
+
+def apollo_lookup(company_name):
+    """Look up a company's employee count and a named founder's email via
+    Apollo.io: organization search by name -> people search within that
+    org filtered to founder/CEO titles -> a match/reveal call for the
+    top person's actual email (Apollo gates real emails behind this
+    separate reveal step; search alone often returns a locked
+    placeholder). Returns None on no company match; returns a dict with
+    empty founder_name/founder_email (not None) when the company matches
+    but no qualifying person is found, since employee_count is still
+    useful to the caller in that case.
+    """
+    if not company_name:
+        return None
+
+    org_resp = _apollo_post("/organizations/search", {"q_organization_name": company_name, "page": 1, "per_page": 1})
+    if not org_resp:
+        return None
+    orgs = org_resp.get("organizations") or []
+    if not orgs:
+        return None
+    org = orgs[0]
+    org_id = org.get("id")
+    employee_count = org.get("estimated_num_employees")
+    if not org_id:
+        return None
+
+    people_resp = _apollo_post("/mixed_people/search", {
+        "organization_ids": [org_id], "person_titles": FOUNDER_TITLES, "page": 1, "per_page": 3,
+    })
+    people = (people_resp or {}).get("people") or []
+    if not people:
+        return {"employee_count": employee_count, "founder_name": "", "founder_email": ""}
+
+    person = people[0]
+    founder_name = person.get("name", "")
+    person_id = person.get("id")
+
+    founder_email = ""
+    if person_id:
+        match_resp = _apollo_post("/people/match", {"id": person_id, "reveal_personal_emails": True})
+        matched = (match_resp or {}).get("person") or {}
+        email = matched.get("email", "")
+        if email and "not_unlocked" not in email:
+            founder_email = email
+
+    return {"employee_count": employee_count, "founder_name": founder_name, "founder_email": founder_email}
+
 
 RULE_BASED_REJECT_THRESHOLD = 0.4
 VALID_SECTORS = {"crypto", "web3", "defi", "fintech", "ai"}

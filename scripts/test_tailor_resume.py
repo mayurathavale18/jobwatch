@@ -193,6 +193,47 @@ def test_call_opencode_returns_none_on_http_error(monkeypatch):
     assert tr.call_opencode("system", "user") is None
 
 
+def test_apollo_lookup_returns_none_without_company_name():
+    assert tr.apollo_lookup("") is None
+
+
+def test_apollo_lookup_returns_none_when_no_organization_match(monkeypatch):
+    monkeypatch.setattr(tr, "_apollo_post", lambda path, payload, timeout=15: {"organizations": []})
+    assert tr.apollo_lookup("Acme") is None
+
+
+def test_apollo_lookup_returns_empty_founder_fields_when_no_people_found(monkeypatch):
+    responses = iter([
+        {"organizations": [{"id": "org1", "estimated_num_employees": 5}]},
+        {"people": []},
+    ])
+    monkeypatch.setattr(tr, "_apollo_post", lambda path, payload, timeout=15: next(responses))
+    result = tr.apollo_lookup("Acme")
+    assert result == {"employee_count": 5, "founder_name": "", "founder_email": ""}
+
+
+def test_apollo_lookup_returns_employee_count_and_founder_email(monkeypatch):
+    responses = iter([
+        {"organizations": [{"id": "org1", "estimated_num_employees": 12}]},
+        {"people": [{"id": "p1", "name": "Jane Founder"}]},
+        {"person": {"email": "jane@acme.xyz"}},
+    ])
+    monkeypatch.setattr(tr, "_apollo_post", lambda path, payload, timeout=15: next(responses))
+    result = tr.apollo_lookup("Acme")
+    assert result == {"employee_count": 12, "founder_name": "Jane Founder", "founder_email": "jane@acme.xyz"}
+
+
+def test_apollo_lookup_treats_unlocked_placeholder_email_as_no_email(monkeypatch):
+    responses = iter([
+        {"organizations": [{"id": "org1", "estimated_num_employees": 8}]},
+        {"people": [{"id": "p1", "name": "Jane Founder"}]},
+        {"person": {"email": "email_not_unlocked@domain.com"}},
+    ])
+    monkeypatch.setattr(tr, "_apollo_post", lambda path, payload, timeout=15: next(responses))
+    result = tr.apollo_lookup("Acme")
+    assert result["founder_email"] == ""
+
+
 def test_fetch_jd_generic_falls_back_to_llm_when_scrape_thin(monkeypatch):
     # Simulate a JS-rendered SPA shell: almost no text in the raw HTML.
     thin_html = b"<html><body><div id='root'></div><script src='app.js'></script></body></html>"
