@@ -29,7 +29,7 @@
 **Interfaces:**
 - Produces: `JobRow.OutreachStatus string`, `JobRow.FounderName string`, `JobRow.FounderEmail string`, `JobRow.OutreachDraftedAt string` — consumed by Task 12 (`internal/web/api.go`'s `toAPIJob`).
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add to `internal/store/store_test.go`:
 
@@ -68,12 +68,12 @@ func TestJobRowHasOutreachFieldsDefaultingEmpty(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd /home/dev-mayur/jobwatch/.claude/worktrees/reply-instructions && go test ./internal/store/... -run TestJobRowHasOutreachFieldsDefaultingEmpty -v`
 Expected: FAIL — `JobRow` has no field `OutreachStatus` (compile error).
 
-- [ ] **Step 3: Add the columns to the schema, migration, struct, and both query sites**
+- [x] **Step 3: Add the columns to the schema, migration, struct, and both query sites**
 
 In `internal/store/store.go`, inside the `const schema = \`` block (around line 92, right after `manual_jd_text TEXT NOT NULL DEFAULT ''`), add:
 
@@ -144,12 +144,12 @@ func getJobQuerier(ctx context.Context, q querier, id int64) (JobRow, error) {
 }
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `go test ./internal/store/... -v`
 Expected: PASS, all existing store tests still pass (additive columns, `SELECT` lists explicit so nothing else breaks).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd /home/dev-mayur/jobwatch/.claude/worktrees/reply-instructions
@@ -168,7 +168,7 @@ git commit -m "Add outreach_status/founder_name/founder_email columns to jobs ta
 **Interfaces:**
 - Produces: `llm_judge(...)` return dict gains `"sector"` key: one of `"crypto"|"web3"|"defi"|"fintech"|"ai"|None`. Consumed by Task 9 (`run_outreach_step`'s caller in `process_job`).
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add to `scripts/test_tailor_resume.py`:
 
@@ -210,12 +210,12 @@ def test_llm_judge_rejects_invalid_sector_value(monkeypatch):
     assert result["sector"] is None
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd /home/dev-mayur/jobwatch && python3 -m pytest scripts/test_tailor_resume.py -k sector -v`
 Expected: FAIL — `KeyError: 'sector'`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 In `scripts/tailor_resume.py`, update the module-level constant block (near line 58, after `RULE_BASED_REJECT_THRESHOLD`):
 
@@ -289,12 +289,12 @@ def llm_judge(jd_text, resume_text, title, company):
 
 In `process_job` (line ~1536), add `"sector": judgment["sector"],` to the `tailored[jid] = {...}` dict literal, alongside the existing `"verdict": judgment["verdict"], ...` line.
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `python3 -m pytest scripts/test_tailor_resume.py -v`
 Expected: PASS — new sector tests pass, all pre-existing `llm_judge` tests still pass (they don't assert on `"sector"`, and `.get("sector")` defaults handle its absence).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd /home/dev-mayur/jobwatch/.claude/worktrees/reply-instructions
@@ -313,7 +313,7 @@ git commit -m "Add sector classification to llm_judge's existing verdict call"
 **Interfaces:**
 - Produces: `fetch_jd_text_for_job(job) -> (jd_text: str, jd_unavailable: bool)`. Consumed by `process_job` (refactored to use it) and by Task 9's `--outreach` CLI path (which needs JD text for an already-tailored job without re-running the whole tailoring flow).
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add to `scripts/test_tailor_resume.py`:
 
@@ -336,12 +336,12 @@ def test_fetch_jd_text_for_job_falls_back_to_title_only(monkeypatch):
     assert jd_unavailable is True
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python3 -m pytest scripts/test_tailor_resume.py -k fetch_jd_text_for_job -v`
 Expected: FAIL — `AttributeError: module 'tailor_resume' has no attribute 'fetch_jd_text_for_job'`.
 
-- [ ] **Step 3: Extract the helper**
+- [x] **Step 3: Extract the helper**
 
 In `scripts/tailor_resume.py`, add this new function right before `process_job` (line ~1345):
 
@@ -394,12 +394,12 @@ Replace `process_job`'s inline JD-fetch block (lines ~1362-1389, from `gh_slug =
     jd_text, jd_unavailable = fetch_jd_text_for_job(job)
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `python3 -m pytest scripts/test_tailor_resume.py -v`
 Expected: PASS — new tests pass, and every existing `process_job`-dependent test (non-eng skip, experience-cap skip, JD-unavailable flagging) still passes unchanged, since the extracted function is byte-for-byte the same logic.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd /home/dev-mayur/jobwatch/.claude/worktrees/reply-instructions
@@ -421,7 +421,7 @@ git commit -m "Extract fetch_jd_text_for_job from process_job for reuse by outre
 
 **Verification note (do this before trusting the parsing in production):** this task's endpoint paths/field names (`/organizations/search`, `/mixed_people/search`, `/people/match`, `estimated_num_employees`, etc.) are written against Apollo's documented v1 API but have **not** been verified with a live call — same rigor gap the project's own convention (see `feedback: verify_generated_output` and this file's own `HANDOFF.md` habit of curling real endpoints before trusting them) requires closing before this ships. Step 6 below is a mandatory live check with a real `APOLLO_API_KEY` and a real small company name — adjust field names if the real response differs.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add to `scripts/test_tailor_resume.py`:
 
@@ -467,12 +467,12 @@ def test_apollo_lookup_treats_unlocked_placeholder_email_as_no_email(monkeypatch
     assert result["founder_email"] == ""
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python3 -m pytest scripts/test_tailor_resume.py -k apollo -v`
 Expected: FAIL — `AttributeError: module 'tailor_resume' has no attribute 'apollo_lookup'`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 Add near the top of `scripts/tailor_resume.py`, after the existing `OPENCODE_API_KEY`/`OPENCODE_BASE_URL` block (~line 58):
 
@@ -565,12 +565,12 @@ def apollo_lookup(company_name):
     return {"employee_count": employee_count, "founder_name": founder_name, "founder_email": founder_email}
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `python3 -m pytest scripts/test_tailor_resume.py -v`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd /home/dev-mayur/jobwatch/.claude/worktrees/reply-instructions
@@ -578,7 +578,7 @@ git add scripts/tailor_resume.py scripts/test_tailor_resume.py
 git commit -m "Add Apollo.io lookup for employee count and founder email"
 ```
 
-- [ ] **Step 6: Live verification (do this in the main repo root, once `APOLLO_API_KEY` exists in `.env`)**
+- [x] **Step 6: Live verification (do this in the main repo root, once `APOLLO_API_KEY` exists in `.env`)**
 
 ```bash
 cd /home/dev-mayur/jobwatch
@@ -593,6 +593,8 @@ print(tr.apollo_lookup('<a real small startup name you know>'))
 
 Confirm the printed dict has a plausible `employee_count` and, ideally, a real-looking `founder_email` (not empty, not `email_not_unlocked@...`). If the shape differs from what Step 3 assumed (e.g. a different key name, or `/people/match` needing `first_name`/`last_name`/`organization_name` instead of `id`), adjust `apollo_lookup`/`_apollo_post` accordingly and re-run this check before moving on — this is the same "verify against the real API before trusting it" step this project already applies to every new provider integration (see `HANDOFF.md`'s web3career example).
 
+**Actual result (2026-07-29, live key):** request shapes were correct against real Apollo responses (`/organizations/search` returned `employee_count: 37` for "Portcast", matching real data), but every person-data endpoint — `/mixed_people/search`, `/people/search`, `/people/match`, `/mixed_companies/search` — returned `403 API_INACCESSIBLE`: *"not included in your Free plan and is not accessible, even with a master key."* Confirmed by probing all four directly, not just the one this task calls. **Apollo's free tier cannot return founder_name/founder_email at all**, only company data. `apollo_lookup` still degrades correctly (`employee_count` populated, founder fields empty — exactly the already-tested "no people found" case), so nothing is broken; automatic founder lookup is just inert until the Apollo plan is upgraded (Mayur's call, not pursuing right now). The plan's own `founder_email_override` mechanism (Global Constraints, Task 9, Task 12) is the intended workaround in the meantime — manual correction, not automatic discovery.
+
 ---
 
 ### Task 5: Outreach status DB read/write helpers
@@ -604,7 +606,7 @@ Confirm the printed dict has a plausible `employee_count` and, ideally, a real-l
 **Interfaces:**
 - Produces: `get_outreach_status(job_id) -> str`, `update_outreach_fields(job_id, status, founder_name="", founder_email="")`. Consumed by Task 9's `run_outreach_step`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add to `scripts/test_tailor_resume.py`:
 
@@ -666,12 +668,12 @@ def test_update_outreach_fields_leaves_drafted_at_empty_for_non_drafted_status(m
     assert row[0] == ""
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python3 -m pytest scripts/test_tailor_resume.py -k outreach_fields -v`
 Expected: FAIL — `AttributeError: module 'tailor_resume' has no attribute 'get_outreach_status'`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 Add right after `update_job_status` in `scripts/tailor_resume.py` (line ~1176):
 
@@ -708,12 +710,12 @@ def update_outreach_fields(job_id, status, founder_name="", founder_email=""):
         conn.close()
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `python3 -m pytest scripts/test_tailor_resume.py -v`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd /home/dev-mayur/jobwatch/.claude/worktrees/reply-instructions
@@ -724,6 +726,8 @@ git commit -m "Add outreach_status DB read/write helpers"
 ---
 
 ### Task 6: Draft outreach email via LLM
+
+**Status (2026-07-29): deferred, not skipped permanently.** Tasks 1-5 merged to `master` as their own checkpoint; picking this up next in the "Gmail draft creation" continuation (tasks 6-8 together), using `founder_email_override` for the founder-email field per the Task 4 note above rather than blocking on an Apollo upgrade.
 
 **Files:**
 - Modify: `scripts/tailor_resume.py` (new constant + function after `apollo_lookup`)
