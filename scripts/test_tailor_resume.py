@@ -193,6 +193,47 @@ def test_call_opencode_returns_none_on_http_error(monkeypatch):
     assert tr.call_opencode("system", "user") is None
 
 
+def test_apollo_lookup_returns_none_without_company_name():
+    assert tr.apollo_lookup("") is None
+
+
+def test_apollo_lookup_returns_none_when_no_organization_match(monkeypatch):
+    monkeypatch.setattr(tr, "_apollo_post", lambda path, payload, timeout=15: {"organizations": []})
+    assert tr.apollo_lookup("Acme") is None
+
+
+def test_apollo_lookup_returns_empty_founder_fields_when_no_people_found(monkeypatch):
+    responses = iter([
+        {"organizations": [{"id": "org1", "estimated_num_employees": 5}]},
+        {"people": []},
+    ])
+    monkeypatch.setattr(tr, "_apollo_post", lambda path, payload, timeout=15: next(responses))
+    result = tr.apollo_lookup("Acme")
+    assert result == {"employee_count": 5, "founder_name": "", "founder_email": ""}
+
+
+def test_apollo_lookup_returns_employee_count_and_founder_email(monkeypatch):
+    responses = iter([
+        {"organizations": [{"id": "org1", "estimated_num_employees": 12}]},
+        {"people": [{"id": "p1", "name": "Jane Founder"}]},
+        {"person": {"email": "jane@acme.xyz"}},
+    ])
+    monkeypatch.setattr(tr, "_apollo_post", lambda path, payload, timeout=15: next(responses))
+    result = tr.apollo_lookup("Acme")
+    assert result == {"employee_count": 12, "founder_name": "Jane Founder", "founder_email": "jane@acme.xyz"}
+
+
+def test_apollo_lookup_treats_unlocked_placeholder_email_as_no_email(monkeypatch):
+    responses = iter([
+        {"organizations": [{"id": "org1", "estimated_num_employees": 8}]},
+        {"people": [{"id": "p1", "name": "Jane Founder"}]},
+        {"person": {"email": "email_not_unlocked@domain.com"}},
+    ])
+    monkeypatch.setattr(tr, "_apollo_post", lambda path, payload, timeout=15: next(responses))
+    result = tr.apollo_lookup("Acme")
+    assert result["founder_email"] == ""
+
+
 def test_fetch_jd_generic_falls_back_to_llm_when_scrape_thin(monkeypatch):
     # Simulate a JS-rendered SPA shell: almost no text in the raw HTML.
     thin_html = b"<html><body><div id='root'></div><script src='app.js'></script></body></html>"
@@ -278,6 +319,53 @@ def test_llm_judge_falls_back_to_rule_based_on_malformed_json(monkeypatch):
     )
     result = tr.llm_judge("JD text", "resume text", "Backend Engineer", "Acme")
     assert result["source"] == "rule_based"
+
+
+def test_llm_judge_extracts_sector_field_when_present(monkeypatch):
+    monkeypatch.setattr(
+        tr, "call_opencode",
+        lambda system_prompt, user_content, model=tr.DEFAULT_OPENCODE_MODEL, timeout=20:
+            '{"verdict": "screen", "missing_keywords": [], "reason": "Good fit.", "sector": "fintech"}',
+    )
+    result = tr.llm_judge("JD text", "resume text", "Backend Engineer", "Acme")
+    assert result["sector"] == "fintech"
+
+
+def test_llm_judge_sector_none_when_absent_from_response(monkeypatch):
+    monkeypatch.setattr(
+        tr, "call_opencode",
+        lambda system_prompt, user_content, model=tr.DEFAULT_OPENCODE_MODEL, timeout=20:
+            '{"verdict": "screen", "missing_keywords": [], "reason": "Good fit."}',
+    )
+    result = tr.llm_judge("JD text", "resume text", "Backend Engineer", "Acme")
+    assert result["sector"] is None
+
+
+def test_llm_judge_sector_none_for_rule_based_fallback(monkeypatch):
+    monkeypatch.setattr(tr, "call_opencode", lambda *a, **k: None)
+    result = tr.llm_judge("JD text about Go and PostgreSQL", "resume text", "Backend Engineer", "Acme")
+    assert result["source"] == "rule_based"
+    assert result["sector"] is None
+
+
+def test_llm_judge_rejects_invalid_sector_value(monkeypatch):
+    monkeypatch.setattr(
+        tr, "call_opencode",
+        lambda system_prompt, user_content, model=tr.DEFAULT_OPENCODE_MODEL, timeout=20:
+            '{"verdict": "screen", "missing_keywords": [], "reason": "Good fit.", "sector": "gaming"}',
+    )
+    result = tr.llm_judge("JD text", "resume text", "Backend Engineer", "Acme")
+    assert result["sector"] is None
+
+
+def test_llm_judge_sector_none_for_unhashable_sector_value(monkeypatch):
+    monkeypatch.setattr(
+        tr, "call_opencode",
+        lambda system_prompt, user_content, model=tr.DEFAULT_OPENCODE_MODEL, timeout=20:
+            '{"verdict": "screen", "missing_keywords": [], "reason": "Good fit.", "sector": ["fintech", "web3"]}',
+    )
+    result = tr.llm_judge("JD text", "resume text", "Backend Engineer", "Acme")
+    assert result["sector"] is None
 
 
 def test_apply_instructions_returns_edited_triple_on_success(monkeypatch):
@@ -1029,3 +1117,78 @@ def test_parse_rebuild_cli_args_mode_only():
 def test_parse_rebuild_cli_args_too_few_args_raises():
     with pytest.raises(ValueError):
         tr._parse_rebuild_cli_args(["5"])
+
+
+def test_fetch_jd_text_for_job_uses_manual_jd_text_when_present():
+    job = {
+        "id": 1, "company_name": "Acme", "title": "Backend Engineer",
+        "url": "https://example.com/job/1", "manual_jd_text": "We need Go and PostgreSQL experience.",
+    }
+    jd_text, jd_unavailable = tr.fetch_jd_text_for_job(job)
+    assert jd_text == "We need Go and PostgreSQL experience."
+    assert jd_unavailable is False
+
+
+def test_fetch_jd_text_for_job_falls_back_to_title_only(monkeypatch):
+    monkeypatch.setattr(tr, "fetch_jd_generic", lambda url: None)
+    job = {"id": 2, "company_name": "Acme", "title": "Backend Engineer", "url": "https://example.com/job/2"}
+    jd_text, jd_unavailable = tr.fetch_jd_text_for_job(job)
+    assert jd_text == "Backend Engineer"
+    assert jd_unavailable is True
+
+
+def test_get_outreach_status_returns_empty_string_by_default(monkeypatch, tmp_path):
+    db_path = tmp_path / "test.db"
+    conn = sqlite3.connect(db_path)
+    conn.execute("CREATE TABLE jobs (id INTEGER PRIMARY KEY, outreach_status TEXT NOT NULL DEFAULT '')")
+    conn.execute("INSERT INTO jobs (id, outreach_status) VALUES (1, '')")
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr(tr, "DB_PATH", db_path)
+
+    assert tr.get_outreach_status(1) == ""
+
+
+def test_update_outreach_fields_sets_status_and_founder_info(monkeypatch, tmp_path):
+    db_path = tmp_path / "test.db"
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        "CREATE TABLE jobs (id INTEGER PRIMARY KEY, outreach_status TEXT NOT NULL DEFAULT '', "
+        "founder_name TEXT NOT NULL DEFAULT '', founder_email TEXT NOT NULL DEFAULT '', "
+        "outreach_drafted_at TEXT NOT NULL DEFAULT '')"
+    )
+    conn.execute("INSERT INTO jobs (id) VALUES (1)")
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr(tr, "DB_PATH", db_path)
+
+    tr.update_outreach_fields(1, "drafted", "Jane Founder", "jane@acme.xyz")
+
+    assert tr.get_outreach_status(1) == "drafted"
+    conn = sqlite3.connect(db_path)
+    row = conn.execute("SELECT founder_name, founder_email, outreach_drafted_at FROM jobs WHERE id = 1").fetchone()
+    conn.close()
+    assert row[0] == "Jane Founder"
+    assert row[1] == "jane@acme.xyz"
+    assert row[2] != ""
+
+
+def test_update_outreach_fields_leaves_drafted_at_empty_for_non_drafted_status(monkeypatch, tmp_path):
+    db_path = tmp_path / "test.db"
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        "CREATE TABLE jobs (id INTEGER PRIMARY KEY, outreach_status TEXT NOT NULL DEFAULT '', "
+        "founder_name TEXT NOT NULL DEFAULT '', founder_email TEXT NOT NULL DEFAULT '', "
+        "outreach_drafted_at TEXT NOT NULL DEFAULT '')"
+    )
+    conn.execute("INSERT INTO jobs (id) VALUES (1)")
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr(tr, "DB_PATH", db_path)
+
+    tr.update_outreach_fields(1, "skipped_size")
+
+    conn = sqlite3.connect(db_path)
+    row = conn.execute("SELECT outreach_drafted_at FROM jobs WHERE id = 1").fetchone()
+    conn.close()
+    assert row[0] == ""

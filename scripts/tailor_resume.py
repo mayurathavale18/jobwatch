@@ -58,6 +58,15 @@ OPENCODE_API_KEY = os.environ.get("OPENCODE_API_KEY", "")
 OPENCODE_BASE_URL = "https://opencode.ai/zen/go/v1"
 DEFAULT_OPENCODE_MODEL = "deepseek-v4-pro"
 
+# Apollo.io: used only for the founder-outreach feature's employee-count
+# and named-founder-email lookup -- company NAME search only (no domain
+# resolution attempted; Greenhouse/Ashby postings live on the ATS's own
+# domain, not the company's, so a reliable domain isn't always derivable).
+APOLLO_API_KEY = os.environ.get("APOLLO_API_KEY", "")
+APOLLO_BASE_URL = "https://api.apollo.io/v1"
+FOUNDER_TITLES = ["founder", "co-founder", "cofounder", "chief executive officer", "ceo"]
+MAX_OUTREACH_EMPLOYEES = 20
+
 # -----------------------------------------------------------------------------
 # Logging helpers
 # -----------------------------------------------------------------------------
@@ -240,15 +249,96 @@ def call_opencode(system_prompt, user_content, model=DEFAULT_OPENCODE_MODEL, tim
         log(f"WARN: OpenCode call failed: {e}")
         return None
 
+
+def _apollo_post(path, payload, timeout=15):
+    """POST to one Apollo.io v1 endpoint. Returns the parsed JSON body, or
+    None on any failure (missing key, timeout, non-200, malformed JSON) --
+    callers always treat None as a miss, never crash.
+    """
+    if not APOLLO_API_KEY:
+        return None
+    body = json.dumps(payload).encode("utf-8")
+    try:
+        req = Request(
+            f"{APOLLO_BASE_URL}{path}",
+            data=body,
+            method="POST",
+            headers={
+                "x-api-key": APOLLO_API_KEY,
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "User-Agent": "jobwatch-outreach/1.0",
+            },
+        )
+        with urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except Exception as e:
+        log(f"WARN: Apollo API call to {path} failed: {e}")
+        return None
+
+
+def apollo_lookup(company_name):
+    """Look up a company's employee count and a named founder's email via
+    Apollo.io: organization search by name -> people search within that
+    org filtered to founder/CEO titles -> a match/reveal call for the
+    top person's actual email (Apollo gates real emails behind this
+    separate reveal step; search alone often returns a locked
+    placeholder). Returns None on no company match; returns a dict with
+    empty founder_name/founder_email (not None) when the company matches
+    but no qualifying person is found, since employee_count is still
+    useful to the caller in that case.
+    """
+    if not company_name:
+        return None
+
+    org_resp = _apollo_post("/organizations/search", {"q_organization_name": company_name, "page": 1, "per_page": 1})
+    if not org_resp:
+        return None
+    orgs = org_resp.get("organizations") or []
+    if not orgs:
+        return None
+    org = orgs[0]
+    org_id = org.get("id")
+    employee_count = org.get("estimated_num_employees")
+    if not org_id:
+        return None
+
+    people_resp = _apollo_post("/mixed_people/search", {
+        "organization_ids": [org_id], "person_titles": FOUNDER_TITLES, "page": 1, "per_page": 3,
+    })
+    people = (people_resp or {}).get("people") or []
+    if not people:
+        return {"employee_count": employee_count, "founder_name": "", "founder_email": ""}
+
+    person = people[0]
+    founder_name = person.get("name", "")
+    person_id = person.get("id")
+
+    founder_email = ""
+    if person_id:
+        match_resp = _apollo_post("/people/match", {"id": person_id, "reveal_personal_emails": True})
+        matched = (match_resp or {}).get("person") or {}
+        email = matched.get("email", "")
+        if email and "not_unlocked" not in email:
+            founder_email = email
+
+    return {"employee_count": employee_count, "founder_name": founder_name, "founder_email": founder_email}
+
+
 RULE_BASED_REJECT_THRESHOLD = 0.4
+VALID_SECTORS = {"crypto", "web3", "defi", "fintech", "ai"}
 
 def llm_judge(jd_text, resume_text, title, company):
     """Judge how a busy recruiter (5-10 seconds per resume, 100+ resumes
     to screen) would react to this resume against this JD: screen it
-    forward, or reject-risk. Always returns a usable result -- falls back
-    to a rule-based verdict (score_coverage threshold) on any LLM
-    failure, timeout, or malformed response, tagged via "source" so the
-    Telegram message can show which one produced it.
+    forward, or reject-risk. Also classifies the company's sector
+    (crypto/web3/defi/fintech/ai, or null) as a free extra field on the
+    same call -- used by the founder-outreach pipeline to decide whether
+    to attempt an outreach draft, at no extra LLM cost. Always returns a
+    usable result -- falls back to a rule-based verdict (score_coverage
+    threshold) on any LLM failure, timeout, or malformed response, tagged
+    via "source" so the Telegram message can show which one produced it.
+    Rule-based fallback never classifies sector (no signal for it).
     """
     raw = call_opencode(
         system_prompt=(
@@ -257,11 +347,15 @@ def llm_judge(jd_text, resume_text, title, company):
             "5-10 seconds on each. Given the job description and a "
             "candidate's resume text, decide: would you screen this "
             "resume forward for a closer look, or is it reject-risk? "
+            "Also classify the company's sector based on the job "
+            "description and company name: one of crypto, web3, defi, "
+            "fintech, ai, or null if none of those clearly apply. "
             "Respond with ONLY valid JSON, no markdown fences, no "
             "commentary, in this exact shape: "
             '{"verdict": "screen"|"reject_risk", '
             '"missing_keywords": ["keyword1", "keyword2"], '
-            '"reason": "one sentence explaining the verdict"}'
+            '"reason": "one sentence explaining the verdict", '
+            '"sector": "crypto"|"web3"|"defi"|"fintech"|"ai"|null}'
         ),
         user_content=f"JOB DESCRIPTION:\n{jd_text}\n\nRESUME:\n{resume_text}",
     )
@@ -270,11 +364,14 @@ def llm_judge(jd_text, resume_text, title, company):
         try:
             parsed = json.loads(raw.strip().strip("`").removeprefix("json").strip())
             if parsed.get("verdict") in ("screen", "reject_risk") and isinstance(parsed.get("missing_keywords"), list):
+                sector = parsed.get("sector")
+                sector = sector if isinstance(sector, str) and sector in VALID_SECTORS else None
                 return {
                     "verdict": parsed["verdict"],
                     "missing_keywords": parsed["missing_keywords"],
                     "reason": str(parsed.get("reason", "")),
                     "source": "llm",
+                    "sector": sector,
                 }
         except (json.JSONDecodeError, AttributeError):
             log("WARN: llm_judge got malformed JSON from OpenCode, falling back to rule-based")
@@ -287,6 +384,7 @@ def llm_judge(jd_text, resume_text, title, company):
         "missing_keywords": not_covered + not_truthful,
         "reason": f"Rule-based: {score:.2f} keyword coverage (LLM unavailable).",
         "source": "rule_based",
+        "sector": None,
     }
 
 def extract_gh_job_id(url):
@@ -1176,6 +1274,39 @@ def update_job_status(job_id, status):
     finally:
         conn.close()
 
+
+def get_outreach_status(job_id):
+    """Read a job's current outreach_status. Empty string if the job has
+    never been through the outreach step (or has no such column yet on a
+    very old DB -- shouldn't happen post-migration, but this never
+    crashes on a missing row).
+    """
+    conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
+    try:
+        row = conn.execute("SELECT outreach_status FROM jobs WHERE id = ?", (int(job_id),)).fetchone()
+        return row[0] if row else ""
+    finally:
+        conn.close()
+
+
+def update_outreach_fields(job_id, status, founder_name="", founder_email=""):
+    """Persist the outcome of one outreach attempt. outreach_drafted_at is
+    only set for status="drafted" -- every other status (skipped_*,
+    failed) leaves it empty, so the dashboard/Telegram can distinguish
+    "never drafted" from "drafted at this timestamp" unambiguously.
+    """
+    drafted_at = datetime.now().isoformat() if status == "drafted" else ""
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        conn.execute(
+            "UPDATE jobs SET outreach_status = ?, founder_name = ?, founder_email = ?, outreach_drafted_at = ? WHERE id = ?",
+            (status, founder_name, founder_email, drafted_at, int(job_id)),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def save_tailored(data):
     TAILORED_JSON_PATH.parent.mkdir(parents=True, exist_ok=True)
     with open(TAILORED_JSON_PATH, "w", encoding="utf-8") as f:
@@ -1342,22 +1473,18 @@ def rebuild_one(job_id, reply_to_message_id=None, mode="fix", instruction=None):
         update_job_status(job_id, "shortlisted")
     return tg_ok, (None if tg_ok else tg_error)
 
-def process_job(job, tailored):
-    """Process one job dict from the jobs table: fetch JD (Greenhouse API,
-    falling back to fetch_jd_generic for anything else), generate and
-    compile the resume, score it, judge it, and send Telegram. Mutates and
-    returns `tailored` (the job-id-keyed tracker dict) plus one of
-    "sent"/"failed"/"skipped_non_eng". Shared by main()'s batch loop and
-    the --job-id one-off path (see the bottom of this file) -- unlike
-    rebuild_one(), this works for a job with NO pre-existing tracker
-    entry, which a fresh manual submission always starts as.
+def fetch_jd_text_for_job(job):
+    """Resolve JD text for a job: Greenhouse API first (free, no LLM),
+    then manually-supplied JD text, then the generic HTML-scrape+LLM
+    fallback, then title-only as a last resort. Returns (jd_text,
+    jd_unavailable) -- jd_unavailable is True only for the title-only
+    last resort, so callers can flag verdicts/drafts as unreliable.
+    Shared by process_job (fresh tailoring) and the --outreach CLI path
+    (which needs JD text for a job already tailored earlier).
     """
-    jid = str(job["id"])
     company = job.get("company_name") or "Unknown"
     title = job.get("title") or "Unknown"
     url = job.get("url") or ""
-
-    log(f"\n--- Processing ID {jid}: {company} — {title} ---")
 
     gh_slug = company_slug(company, url)
     gh_id = extract_gh_job_id(url)
@@ -1379,14 +1506,35 @@ def process_job(job, tailored):
     if not jd_data:
         jd_data = fetch_jd_generic(url)
     if not jd_data or (not manual_jd_text_used and len(jd_data.get("content_text", "")) < MIN_USABLE_JD_CHARS):
-        log(f"WARN: Could not fetch usable JD for {jid}; using title only")
         jd_unavailable = True
         jd_data = {
             "title": title, "company_name": company, "content_text": title,
             "content_html": "", "location": "", "absolute_url": url,
         }
 
-    jd_text = jd_data.get("content_text", "")
+    return jd_data.get("content_text", ""), jd_unavailable
+
+def process_job(job, tailored):
+    """Process one job dict from the jobs table: fetch JD (Greenhouse API,
+    falling back to fetch_jd_generic for anything else), generate and
+    compile the resume, score it, judge it, and send Telegram. Mutates and
+    returns `tailored` (the job-id-keyed tracker dict) plus one of
+    "sent"/"failed"/"skipped_non_eng". Shared by main()'s batch loop and
+    the --job-id one-off path (see the bottom of this file) -- unlike
+    rebuild_one(), this works for a job with NO pre-existing tracker
+    entry, which a fresh manual submission always starts as.
+    """
+    jid = str(job["id"])
+    company = job.get("company_name") or "Unknown"
+    title = job.get("title") or "Unknown"
+    url = job.get("url") or ""
+
+    log(f"\n--- Processing ID {jid}: {company} — {title} ---")
+
+    jd_text, jd_unavailable = fetch_jd_text_for_job(job)
+    if jd_unavailable:
+        log(f"WARN: Could not fetch usable JD for {jid}; using title only")
+    jd_data = {"title": title, "content_text": jd_text}
 
     if not is_engineering_role(title, jd_text):
         log(f"SKIPPED (non-engineering): {title}")
@@ -1481,6 +1629,7 @@ def process_job(job, tailored):
         "hedged_keywords": tiered["hedged"],
         "verdict": judgment["verdict"], "verdict_source": judgment["source"],
         "verdict_reason": judgment["reason"], "missing_keywords": judgment["missing_keywords"],
+        "sector": judgment["sector"],
         "jd_unavailable": jd_unavailable,
     }
     save_tailored(tailored)

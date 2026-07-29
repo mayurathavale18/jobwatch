@@ -427,3 +427,36 @@ func TestPollRunLifecycle(t *testing.T) {
 		t.Errorf("last = %+v", last)
 	}
 }
+
+func TestJobRowHasOutreachFieldsDefaultingEmpty(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+
+	tx, err := s.BeginTx(ctx)
+	if err != nil {
+		t.Fatalf("BeginTx: %v", err)
+	}
+	id, err := s.InsertJob(ctx, tx, sampleJob(), StatusNew)
+	if err != nil {
+		t.Fatalf("InsertJob: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+
+	job, err := s.GetJob(ctx, id)
+	if err != nil {
+		t.Fatalf("GetJob: %v", err)
+	}
+	if job.OutreachStatus != "" || job.FounderName != "" || job.FounderEmail != "" || job.OutreachDraftedAt != "" {
+		t.Errorf("outreach fields = %+v, want all empty by default", job)
+	}
+
+	rows, err := s.ListJobs(ctx, JobFilter{})
+	if err != nil {
+		t.Fatalf("ListJobs: %v", err)
+	}
+	if len(rows) != 1 || rows[0].OutreachStatus != "" {
+		t.Errorf("ListJobs rows = %+v, want one row with empty OutreachStatus", rows)
+	}
+}
