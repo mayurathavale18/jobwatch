@@ -1076,3 +1076,21 @@ def test_parse_rebuild_cli_args_mode_only():
 def test_parse_rebuild_cli_args_too_few_args_raises():
     with pytest.raises(ValueError):
         tr._parse_rebuild_cli_args(["5"])
+
+
+def test_fetch_jd_text_for_job_uses_manual_jd_text_when_present():
+    job = {
+        "id": 1, "company_name": "Acme", "title": "Backend Engineer",
+        "url": "https://example.com/job/1", "manual_jd_text": "We need Go and PostgreSQL experience.",
+    }
+    jd_text, jd_unavailable, jd_data = tr.fetch_jd_text_for_job(job)
+    assert jd_text == "We need Go and PostgreSQL experience."
+    assert jd_unavailable is False
+
+
+def test_fetch_jd_text_for_job_falls_back_to_title_only(monkeypatch):
+    monkeypatch.setattr(tr, "fetch_jd_generic", lambda url: None)
+    job = {"id": 2, "company_name": "Acme", "title": "Backend Engineer", "url": "https://example.com/job/2"}
+    jd_text, jd_unavailable, jd_data = tr.fetch_jd_text_for_job(job)
+    assert jd_text == "Backend Engineer"
+    assert jd_unavailable is True

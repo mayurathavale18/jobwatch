@@ -1355,22 +1355,18 @@ def rebuild_one(job_id, reply_to_message_id=None, mode="fix", instruction=None):
         update_job_status(job_id, "shortlisted")
     return tg_ok, (None if tg_ok else tg_error)
 
-def process_job(job, tailored):
-    """Process one job dict from the jobs table: fetch JD (Greenhouse API,
-    falling back to fetch_jd_generic for anything else), generate and
-    compile the resume, score it, judge it, and send Telegram. Mutates and
-    returns `tailored` (the job-id-keyed tracker dict) plus one of
-    "sent"/"failed"/"skipped_non_eng". Shared by main()'s batch loop and
-    the --job-id one-off path (see the bottom of this file) -- unlike
-    rebuild_one(), this works for a job with NO pre-existing tracker
-    entry, which a fresh manual submission always starts as.
+def fetch_jd_text_for_job(job):
+    """Resolve JD text for a job: Greenhouse API first (free, no LLM),
+    then manually-supplied JD text, then the generic HTML-scrape+LLM
+    fallback, then title-only as a last resort. Returns (jd_text,
+    jd_unavailable, jd_data) -- jd_unavailable is True only for the title-only
+    last resort, so callers can flag verdicts/drafts as unreliable.
+    Shared by process_job (fresh tailoring) and the --outreach CLI path
+    (which needs JD text for a job already tailored earlier).
     """
-    jid = str(job["id"])
     company = job.get("company_name") or "Unknown"
     title = job.get("title") or "Unknown"
     url = job.get("url") or ""
-
-    log(f"\n--- Processing ID {jid}: {company} — {title} ---")
 
     gh_slug = company_slug(company, url)
     gh_id = extract_gh_job_id(url)
@@ -1392,14 +1388,34 @@ def process_job(job, tailored):
     if not jd_data:
         jd_data = fetch_jd_generic(url)
     if not jd_data or (not manual_jd_text_used and len(jd_data.get("content_text", "")) < MIN_USABLE_JD_CHARS):
-        log(f"WARN: Could not fetch usable JD for {jid}; using title only")
         jd_unavailable = True
         jd_data = {
             "title": title, "company_name": company, "content_text": title,
             "content_html": "", "location": "", "absolute_url": url,
         }
 
-    jd_text = jd_data.get("content_text", "")
+    return jd_data.get("content_text", ""), jd_unavailable, jd_data
+
+def process_job(job, tailored):
+    """Process one job dict from the jobs table: fetch JD (Greenhouse API,
+    falling back to fetch_jd_generic for anything else), generate and
+    compile the resume, score it, judge it, and send Telegram. Mutates and
+    returns `tailored` (the job-id-keyed tracker dict) plus one of
+    "sent"/"failed"/"skipped_non_eng". Shared by main()'s batch loop and
+    the --job-id one-off path (see the bottom of this file) -- unlike
+    rebuild_one(), this works for a job with NO pre-existing tracker
+    entry, which a fresh manual submission always starts as.
+    """
+    jid = str(job["id"])
+    company = job.get("company_name") or "Unknown"
+    title = job.get("title") or "Unknown"
+    url = job.get("url") or ""
+
+    log(f"\n--- Processing ID {jid}: {company} — {title} ---")
+
+    jd_text, jd_unavailable, jd_data = fetch_jd_text_for_job(job)
+    if jd_unavailable:
+        log(f"WARN: Could not fetch usable JD for {jid}; using title only")
 
     if not is_engineering_role(title, jd_text):
         log(f"SKIPPED (non-engineering): {title}")
