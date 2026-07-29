@@ -1135,3 +1135,60 @@ def test_fetch_jd_text_for_job_falls_back_to_title_only(monkeypatch):
     jd_text, jd_unavailable = tr.fetch_jd_text_for_job(job)
     assert jd_text == "Backend Engineer"
     assert jd_unavailable is True
+
+
+def test_get_outreach_status_returns_empty_string_by_default(monkeypatch, tmp_path):
+    db_path = tmp_path / "test.db"
+    conn = sqlite3.connect(db_path)
+    conn.execute("CREATE TABLE jobs (id INTEGER PRIMARY KEY, outreach_status TEXT NOT NULL DEFAULT '')")
+    conn.execute("INSERT INTO jobs (id, outreach_status) VALUES (1, '')")
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr(tr, "DB_PATH", db_path)
+
+    assert tr.get_outreach_status(1) == ""
+
+
+def test_update_outreach_fields_sets_status_and_founder_info(monkeypatch, tmp_path):
+    db_path = tmp_path / "test.db"
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        "CREATE TABLE jobs (id INTEGER PRIMARY KEY, outreach_status TEXT NOT NULL DEFAULT '', "
+        "founder_name TEXT NOT NULL DEFAULT '', founder_email TEXT NOT NULL DEFAULT '', "
+        "outreach_drafted_at TEXT NOT NULL DEFAULT '')"
+    )
+    conn.execute("INSERT INTO jobs (id) VALUES (1)")
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr(tr, "DB_PATH", db_path)
+
+    tr.update_outreach_fields(1, "drafted", "Jane Founder", "jane@acme.xyz")
+
+    assert tr.get_outreach_status(1) == "drafted"
+    conn = sqlite3.connect(db_path)
+    row = conn.execute("SELECT founder_name, founder_email, outreach_drafted_at FROM jobs WHERE id = 1").fetchone()
+    conn.close()
+    assert row[0] == "Jane Founder"
+    assert row[1] == "jane@acme.xyz"
+    assert row[2] != ""
+
+
+def test_update_outreach_fields_leaves_drafted_at_empty_for_non_drafted_status(monkeypatch, tmp_path):
+    db_path = tmp_path / "test.db"
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        "CREATE TABLE jobs (id INTEGER PRIMARY KEY, outreach_status TEXT NOT NULL DEFAULT '', "
+        "founder_name TEXT NOT NULL DEFAULT '', founder_email TEXT NOT NULL DEFAULT '', "
+        "outreach_drafted_at TEXT NOT NULL DEFAULT '')"
+    )
+    conn.execute("INSERT INTO jobs (id) VALUES (1)")
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr(tr, "DB_PATH", db_path)
+
+    tr.update_outreach_fields(1, "skipped_size")
+
+    conn = sqlite3.connect(db_path)
+    row = conn.execute("SELECT outreach_drafted_at FROM jobs WHERE id = 1").fetchone()
+    conn.close()
+    assert row[0] == ""

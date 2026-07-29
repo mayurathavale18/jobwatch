@@ -1274,6 +1274,39 @@ def update_job_status(job_id, status):
     finally:
         conn.close()
 
+
+def get_outreach_status(job_id):
+    """Read a job's current outreach_status. Empty string if the job has
+    never been through the outreach step (or has no such column yet on a
+    very old DB -- shouldn't happen post-migration, but this never
+    crashes on a missing row).
+    """
+    conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
+    try:
+        row = conn.execute("SELECT outreach_status FROM jobs WHERE id = ?", (int(job_id),)).fetchone()
+        return row[0] if row else ""
+    finally:
+        conn.close()
+
+
+def update_outreach_fields(job_id, status, founder_name="", founder_email=""):
+    """Persist the outcome of one outreach attempt. outreach_drafted_at is
+    only set for status="drafted" -- every other status (skipped_*,
+    failed) leaves it empty, so the dashboard/Telegram can distinguish
+    "never drafted" from "drafted at this timestamp" unambiguously.
+    """
+    drafted_at = datetime.now().isoformat() if status == "drafted" else ""
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        conn.execute(
+            "UPDATE jobs SET outreach_status = ?, founder_name = ?, founder_email = ?, outreach_drafted_at = ? WHERE id = ?",
+            (status, founder_name, founder_email, drafted_at, int(job_id)),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def save_tailored(data):
     TAILORED_JSON_PATH.parent.mkdir(parents=True, exist_ok=True)
     with open(TAILORED_JSON_PATH, "w", encoding="utf-8") as f:
