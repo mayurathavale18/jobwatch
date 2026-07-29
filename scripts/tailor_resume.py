@@ -1359,7 +1359,7 @@ def fetch_jd_text_for_job(job):
     """Resolve JD text for a job: Greenhouse API first (free, no LLM),
     then manually-supplied JD text, then the generic HTML-scrape+LLM
     fallback, then title-only as a last resort. Returns (jd_text,
-    jd_unavailable, jd_data) -- jd_unavailable is True only for the title-only
+    jd_unavailable) -- jd_unavailable is True only for the title-only
     last resort, so callers can flag verdicts/drafts as unreliable.
     Shared by process_job (fresh tailoring) and the --outreach CLI path
     (which needs JD text for a job already tailored earlier).
@@ -1394,7 +1394,7 @@ def fetch_jd_text_for_job(job):
             "content_html": "", "location": "", "absolute_url": url,
         }
 
-    return jd_data.get("content_text", ""), jd_unavailable, jd_data
+    return jd_data.get("content_text", ""), jd_unavailable
 
 def process_job(job, tailored):
     """Process one job dict from the jobs table: fetch JD (Greenhouse API,
@@ -1413,9 +1413,10 @@ def process_job(job, tailored):
 
     log(f"\n--- Processing ID {jid}: {company} — {title} ---")
 
-    jd_text, jd_unavailable, jd_data = fetch_jd_text_for_job(job)
+    jd_text, jd_unavailable = fetch_jd_text_for_job(job)
     if jd_unavailable:
         log(f"WARN: Could not fetch usable JD for {jid}; using title only")
+    jd_data = {"title": title, "content_text": jd_text}
 
     if not is_engineering_role(title, jd_text):
         log(f"SKIPPED (non-engineering): {title}")
