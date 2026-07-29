@@ -317,6 +317,16 @@ def test_llm_judge_rejects_invalid_sector_value(monkeypatch):
     assert result["sector"] is None
 
 
+def test_llm_judge_sector_none_for_unhashable_sector_value(monkeypatch):
+    monkeypatch.setattr(
+        tr, "call_opencode",
+        lambda system_prompt, user_content, model=tr.DEFAULT_OPENCODE_MODEL, timeout=20:
+            '{"verdict": "screen", "missing_keywords": [], "reason": "Good fit.", "sector": ["fintech", "web3"]}',
+    )
+    result = tr.llm_judge("JD text", "resume text", "Backend Engineer", "Acme")
+    assert result["sector"] is None
+
+
 def test_apply_instructions_returns_edited_triple_on_success(monkeypatch):
     monkeypatch.setattr(
         tr, "call_opencode",

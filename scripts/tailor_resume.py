@@ -280,8 +280,7 @@ def llm_judge(jd_text, resume_text, title, company):
             parsed = json.loads(raw.strip().strip("`").removeprefix("json").strip())
             if parsed.get("verdict") in ("screen", "reject_risk") and isinstance(parsed.get("missing_keywords"), list):
                 sector = parsed.get("sector")
-                if sector not in VALID_SECTORS:
-                    sector = None
+                sector = sector if isinstance(sector, str) and sector in VALID_SECTORS else None
                 return {
                     "verdict": parsed["verdict"],
                     "missing_keywords": parsed["missing_keywords"],
