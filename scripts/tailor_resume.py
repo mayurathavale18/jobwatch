@@ -241,14 +241,19 @@ def call_opencode(system_prompt, user_content, model=DEFAULT_OPENCODE_MODEL, tim
         return None
 
 RULE_BASED_REJECT_THRESHOLD = 0.4
+VALID_SECTORS = {"crypto", "web3", "defi", "fintech", "ai"}
 
 def llm_judge(jd_text, resume_text, title, company):
     """Judge how a busy recruiter (5-10 seconds per resume, 100+ resumes
     to screen) would react to this resume against this JD: screen it
-    forward, or reject-risk. Always returns a usable result -- falls back
-    to a rule-based verdict (score_coverage threshold) on any LLM
-    failure, timeout, or malformed response, tagged via "source" so the
-    Telegram message can show which one produced it.
+    forward, or reject-risk. Also classifies the company's sector
+    (crypto/web3/defi/fintech/ai, or null) as a free extra field on the
+    same call -- used by the founder-outreach pipeline to decide whether
+    to attempt an outreach draft, at no extra LLM cost. Always returns a
+    usable result -- falls back to a rule-based verdict (score_coverage
+    threshold) on any LLM failure, timeout, or malformed response, tagged
+    via "source" so the Telegram message can show which one produced it.
+    Rule-based fallback never classifies sector (no signal for it).
     """
     raw = call_opencode(
         system_prompt=(
@@ -257,11 +262,15 @@ def llm_judge(jd_text, resume_text, title, company):
             "5-10 seconds on each. Given the job description and a "
             "candidate's resume text, decide: would you screen this "
             "resume forward for a closer look, or is it reject-risk? "
+            "Also classify the company's sector based on the job "
+            "description and company name: one of crypto, web3, defi, "
+            "fintech, ai, or null if none of those clearly apply. "
             "Respond with ONLY valid JSON, no markdown fences, no "
             "commentary, in this exact shape: "
             '{"verdict": "screen"|"reject_risk", '
             '"missing_keywords": ["keyword1", "keyword2"], '
-            '"reason": "one sentence explaining the verdict"}'
+            '"reason": "one sentence explaining the verdict", '
+            '"sector": "crypto"|"web3"|"defi"|"fintech"|"ai"|null}'
         ),
         user_content=f"JOB DESCRIPTION:\n{jd_text}\n\nRESUME:\n{resume_text}",
     )
@@ -270,11 +279,15 @@ def llm_judge(jd_text, resume_text, title, company):
         try:
             parsed = json.loads(raw.strip().strip("`").removeprefix("json").strip())
             if parsed.get("verdict") in ("screen", "reject_risk") and isinstance(parsed.get("missing_keywords"), list):
+                sector = parsed.get("sector")
+                if sector not in VALID_SECTORS:
+                    sector = None
                 return {
                     "verdict": parsed["verdict"],
                     "missing_keywords": parsed["missing_keywords"],
                     "reason": str(parsed.get("reason", "")),
                     "source": "llm",
+                    "sector": sector,
                 }
         except (json.JSONDecodeError, AttributeError):
             log("WARN: llm_judge got malformed JSON from OpenCode, falling back to rule-based")
@@ -287,6 +300,7 @@ def llm_judge(jd_text, resume_text, title, company):
         "missing_keywords": not_covered + not_truthful,
         "reason": f"Rule-based: {score:.2f} keyword coverage (LLM unavailable).",
         "source": "rule_based",
+        "sector": None,
     }
 
 def extract_gh_job_id(url):
@@ -1481,6 +1495,7 @@ def process_job(job, tailored):
         "hedged_keywords": tiered["hedged"],
         "verdict": judgment["verdict"], "verdict_source": judgment["source"],
         "verdict_reason": judgment["reason"], "missing_keywords": judgment["missing_keywords"],
+        "sector": judgment["sector"],
         "jd_unavailable": jd_unavailable,
     }
     save_tailored(tailored)
