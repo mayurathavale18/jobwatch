@@ -1,6 +1,7 @@
 package web
 
 import (
+	"database/sql"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -16,30 +17,38 @@ import (
 )
 
 type apiJob struct {
-	ID          int64  `json:"id"`
-	CompanySlug string `json:"companySlug"`
-	CompanyName string `json:"companyName"`
-	Title       string `json:"title"`
-	Location    string `json:"location"`
-	URL         string `json:"url"`
-	PostedAt    string `json:"postedAt"`
-	FirstSeenAt string `json:"firstSeenAt"`
-	Status      string `json:"status"`
-	Notes       string `json:"notes"`
+	ID                int64  `json:"id"`
+	CompanySlug       string `json:"companySlug"`
+	CompanyName       string `json:"companyName"`
+	Title             string `json:"title"`
+	Location          string `json:"location"`
+	URL               string `json:"url"`
+	PostedAt          string `json:"postedAt"`
+	FirstSeenAt       string `json:"firstSeenAt"`
+	Status            string `json:"status"`
+	Notes             string `json:"notes"`
+	OutreachStatus    string `json:"outreachStatus"`
+	FounderName       string `json:"founderName"`
+	FounderEmail      string `json:"founderEmail"`
+	OutreachDraftedAt string `json:"outreachDraftedAt"`
 }
 
 func toAPIJob(j store.JobRow) apiJob {
 	return apiJob{
-		ID:          j.ID,
-		CompanySlug: j.CompanySlug,
-		CompanyName: j.CompanyName,
-		Title:       j.Title,
-		Location:    j.Location,
-		URL:         j.URL,
-		PostedAt:    j.PostedAt.String,
-		FirstSeenAt: j.FirstSeenAt,
-		Status:      j.Status,
-		Notes:       j.Notes,
+		ID:                j.ID,
+		CompanySlug:       j.CompanySlug,
+		CompanyName:       j.CompanyName,
+		Title:             j.Title,
+		Location:          j.Location,
+		URL:               j.URL,
+		PostedAt:          j.PostedAt.String,
+		FirstSeenAt:       j.FirstSeenAt,
+		Status:            j.Status,
+		Notes:             j.Notes,
+		OutreachStatus:    j.OutreachStatus,
+		FounderName:       j.FounderName,
+		FounderEmail:      j.FounderEmail,
+		OutreachDraftedAt: j.OutreachDraftedAt,
 	}
 }
 
@@ -324,6 +333,75 @@ func (s *Server) handleAPIJobsManual(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusAccepted)
 	writeJSON(w, resp)
+}
+
+// outreachOneScript is the wrapper spawned for a manual outreach trigger
+// (dashboard button or Telegram "outreach" reply), relative to the
+// process's cwd -- same convention as tailorOneScript.
+const outreachOneScript = "scripts/outreach-one.sh"
+
+type apiOutreachRequest struct {
+	FounderEmail string `json:"founderEmail"`
+}
+
+// handleAPIJobsOutreach triggers a one-off founder-outreach attempt for
+// an existing job from the dashboard. Mirrors handleAPIJobsManual's
+// detached-exec pattern -- the HTTP response doesn't wait for the
+// lookup/draft to finish; the result surfaces via Telegram (see
+// run_outreach_step's own notification) or a later dashboard refresh of
+// outreachStatus.
+func (s *Server) handleAPIJobsOutreach(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		http.Error(w, "invalid job id", http.StatusBadRequest)
+		return
+	}
+
+	var req apiOutreachRequest
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&req) // optional body; malformed/empty is fine, just no override
+	}
+
+	if _, err := s.store.GetJob(ctx, id); err != nil {
+		if err == sql.ErrNoRows {
+			http.Error(w, "job not found", http.StatusNotFound)
+			return
+		}
+		httpError(w, "loading job", err)
+		return
+	}
+
+	logFile, err := os.OpenFile(filepath.Join(s.logsDir, "cron.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		httpError(w, "opening cron.log", err)
+		return
+	}
+
+	args := []string{outreachOneScript, strconv.FormatInt(id, 10)}
+	if req.FounderEmail != "" {
+		args = append(args, req.FounderEmail)
+	}
+	cmd := exec.Command("bash", args...)
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
+
+	if err := cmd.Start(); err != nil {
+		logFile.Close()
+		httpError(w, "starting outreach-one", err)
+		return
+	}
+
+	go func() {
+		defer logFile.Close()
+		if err := cmd.Wait(); err != nil {
+			slog.Error("outreach-one exited non-zero", "job_id", id, "error", err)
+		}
+	}()
+
+	w.WriteHeader(http.StatusAccepted)
+	writeJSON(w, map[string]any{"id": id})
 }
 
 func writeJSON(w http.ResponseWriter, v any) {

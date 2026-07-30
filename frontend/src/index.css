@@ -317,3 +317,21 @@ button:disabled {
   gap: 1rem;
   margin-top: 1rem;
 }
+
+.outreach-cell {
+  min-width: 200px;
+}
+.outreach-cell input[type='email'] {
+  width: 100%;
+  box-sizing: border-box;
+  margin-bottom: 0.3rem;
+}
+.outreach-drafted {
+  color: var(--accent);
+  font-weight: 600;
+}
+.outreach-status-msg {
+  margin-top: 0.3rem;
+  font-size: 0.8em;
+  color: var(--muted);
+}

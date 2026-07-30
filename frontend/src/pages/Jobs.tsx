@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { fetchJobs, patchJob, submitManualJob, type JobsResponse } from '../api'
+import { fetchJobs, patchJob, submitManualJob, triggerOutreach, type JobsResponse } from '../api'
 
 function filtersFromLocation(): { status: string; provider: string; company: string; q: string; days: number } {
   const params = new URLSearchParams(window.location.search)
@@ -25,6 +25,8 @@ export default function Jobs() {
   const [manualJdText, setManualJdText] = useState('')
   const [manualStatus, setManualStatus] = useState<string | null>(null)
   const [manualSubmitting, setManualSubmitting] = useState(false)
+  const [outreachOverride, setOutreachOverride] = useState<Record<number, string>>({})
+  const [outreachStatusMsg, setOutreachStatusMsg] = useState<Record<number, string>>({})
 
   // Typed as a minimal structural type (just the one method this handler
   // needs) rather than importing React.FormEvent -- this file has no
@@ -111,6 +113,16 @@ export default function Jobs() {
 
   async function updateNotes(id: number, notes: string) {
     await patchJob(id, { notes })
+  }
+
+  async function handleTriggerOutreach(id: number) {
+    setOutreachStatusMsg((m) => ({ ...m, [id]: 'Queued…' }))
+    try {
+      await triggerOutreach(id, outreachOverride[id]?.trim() || undefined)
+      setOutreachStatusMsg((m) => ({ ...m, [id]: 'Queued — check Gmail Drafts / Telegram' }))
+    } catch (err) {
+      setOutreachStatusMsg((m) => ({ ...m, [id]: `Failed: ${err instanceof Error ? err.message : String(err)}` }))
+    }
   }
 
   if (!data) return <p className="muted">Loading...</p>
@@ -228,12 +240,13 @@ export default function Jobs() {
             <th>Location</th>
             <th>Status</th>
             <th>Notes</th>
+            <th>Outreach</th>
           </tr>
         </thead>
         <tbody>
           {data.jobs.length === 0 ? (
             <tr>
-              <td colSpan={6} className="muted">
+              <td colSpan={7} className="muted">
                 No jobs match the current filters.
               </td>
             </tr>
@@ -268,6 +281,26 @@ export default function Jobs() {
                     defaultValue={job.notes}
                     onBlur={(e) => updateNotes(job.id, e.target.value)}
                   />
+                </td>
+                <td className="outreach-cell">
+                  {job.outreachStatus === 'drafted' ? (
+                    <span className="outreach-drafted">
+                      Drafted — {job.founderName || job.founderEmail}
+                    </span>
+                  ) : (
+                    <>
+                      <input
+                        type="email"
+                        placeholder="Override founder email (optional)"
+                        value={outreachOverride[job.id] ?? ''}
+                        onChange={(e) => setOutreachOverride((m) => ({ ...m, [job.id]: e.target.value }))}
+                      />
+                      <button type="button" onClick={() => handleTriggerOutreach(job.id)}>
+                        Draft outreach
+                      </button>
+                    </>
+                  )}
+                  {outreachStatusMsg[job.id] && <div className="outreach-status-msg">{outreachStatusMsg[job.id]}</div>}
                 </td>
               </tr>
             ))

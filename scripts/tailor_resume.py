@@ -5,6 +5,7 @@ Generates tailored LaTeX resumes for unprocessed 'new' jobs, compiles to PDF,
 verifies one page, updates tracker, and sends Telegram notifications.
 """
 
+import base64
 import json
 import os
 import re
@@ -15,8 +16,12 @@ import sys
 import time
 import html
 from datetime import datetime
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.mime.application import MIMEApplication
 from urllib.request import urlopen, Request
 from urllib.error import HTTPError, URLError
+from urllib.parse import urlencode
 from pathlib import Path
 
 # -----------------------------------------------------------------------------
@@ -58,6 +63,12 @@ OPENCODE_API_KEY = os.environ.get("OPENCODE_API_KEY", "")
 OPENCODE_BASE_URL = "https://opencode.ai/zen/go/v1"
 DEFAULT_OPENCODE_MODEL = "deepseek-v4-pro"
 
+# Separate, independently-swappable model for outreach-email drafting --
+# same OpenCode Go gateway/subscription as tailoring's LLM calls, but its
+# own named constant so it can be pointed at a cheaper model later
+# without touching the (much higher-volume) tailoring/verdict call.
+OUTREACH_EMAIL_MODEL = DEFAULT_OPENCODE_MODEL
+
 # Apollo.io: used only for the founder-outreach feature's employee-count
 # and named-founder-email lookup -- company NAME search only (no domain
 # resolution attempted; Greenhouse/Ashby postings live on the ATS's own
@@ -66,6 +77,16 @@ APOLLO_API_KEY = os.environ.get("APOLLO_API_KEY", "")
 APOLLO_BASE_URL = "https://api.apollo.io/v1"
 FOUNDER_TITLES = ["founder", "co-founder", "cofounder", "chief executive officer", "ceo"]
 MAX_OUTREACH_EMPLOYEES = 20
+
+# Gmail API (gmail.compose scope only -- can create/edit drafts, cannot
+# read or send mail). OAuth2 refresh token, minted once via the local
+# scripts/gmail_auth_setup.py flow (see docs/superpowers/specs/
+# 2026-07-27-founder-outreach-design.md's "Gmail OAuth setup" section).
+GMAIL_CLIENT_ID = os.environ.get("GMAIL_CLIENT_ID", "")
+GMAIL_CLIENT_SECRET = os.environ.get("GMAIL_CLIENT_SECRET", "")
+GMAIL_REFRESH_TOKEN = os.environ.get("GMAIL_REFRESH_TOKEN", "")
+GMAIL_TOKEN_URL = "https://oauth2.googleapis.com/token"
+GMAIL_DRAFTS_URL = "https://gmail.googleapis.com/gmail/v1/users/me/drafts"
 
 # -----------------------------------------------------------------------------
 # Logging helpers
@@ -323,6 +344,123 @@ def apollo_lookup(company_name):
             founder_email = email
 
     return {"employee_count": employee_count, "founder_name": founder_name, "founder_email": founder_email}
+
+
+def draft_outreach_email(jd_text, resume_text, founder_name, title, company):
+    """Generate a short, personalized cold-outreach email from the
+    candidate to a startup founder, referencing concrete JD/resume
+    overlap. Returns {"subject": str, "body": str} on success, None on
+    any LLM failure or malformed/empty response -- callers must skip
+    (never fall back to a generic template; a non-personalized "draft"
+    isn't worth creating, see spec's Error handling section).
+
+    Uses a 45s timeout (not call_opencode's 20s default): live-tested
+    against a real JD+resume-sized prompt on OUTREACH_EMAIL_MODEL and it
+    took ~35s. llm_judge sends similarly-sized prompts at the 20s default
+    and gets away with it only because it has a rule-based fallback on
+    timeout; this function has no fallback by design, so it needs real
+    headroom instead.
+    """
+    raw = call_opencode(
+        system_prompt=(
+            "You write short, genuine-sounding cold outreach emails from "
+            "a software engineer job candidate directly to a startup "
+            f"founder. The candidate is applying for a {title} role at "
+            f"{company}. Reference one or two concrete points from the "
+            "job description and the candidate's resume that make them a "
+            "good fit -- do not invent any experience not present in the "
+            "resume text. Keep it under 150 words, no generic flattery, "
+            "no 'I hope this email finds you well'. Respond with ONLY "
+            "valid JSON, no markdown fences, no commentary, in this "
+            'exact shape: {"subject": "...", "body": "..."}'
+        ),
+        user_content=(
+            f"FOUNDER NAME: {founder_name or 'there'}\n\n"
+            f"JOB DESCRIPTION:\n{jd_text}\n\nRESUME:\n{resume_text}"
+        ),
+        model=OUTREACH_EMAIL_MODEL,
+        timeout=45,
+    )
+    if not raw:
+        return None
+    try:
+        parsed = json.loads(raw.strip().strip("`").removeprefix("json").strip())
+    except (json.JSONDecodeError, AttributeError):
+        log("WARN: draft_outreach_email got malformed JSON from OpenCode")
+        return None
+
+    subject = str(parsed.get("subject", "")).strip()
+    body = str(parsed.get("body", "")).strip()
+    if not subject or not body:
+        return None
+    return {"subject": subject, "body": body}
+
+
+def _gmail_access_token():
+    """Exchange the long-lived refresh token for a short-lived access
+    token. Returns the token string, or None on any failure (missing
+    config, revoked token, network error) -- callers must treat this as
+    a miss, never crash.
+    """
+    if not (GMAIL_CLIENT_ID and GMAIL_CLIENT_SECRET and GMAIL_REFRESH_TOKEN):
+        return None
+    body = urlencode({
+        "client_id": GMAIL_CLIENT_ID,
+        "client_secret": GMAIL_CLIENT_SECRET,
+        "refresh_token": GMAIL_REFRESH_TOKEN,
+        "grant_type": "refresh_token",
+    }).encode("utf-8")
+    try:
+        req = Request(
+            GMAIL_TOKEN_URL, data=body, method="POST",
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        with urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        return data.get("access_token")
+    except Exception as e:
+        log(f"WARN: Gmail token refresh failed: {e}")
+        return None
+
+
+def create_gmail_draft(to_email, subject, body_text, attachment_path=None):
+    """Create a Gmail draft (never sends) via the Gmail API. Returns
+    (True, None) on success, (False, error_message) on any failure --
+    callers must treat failure as retryable (outreach_status='failed'),
+    never crash the caller's own flow.
+    """
+    access_token = _gmail_access_token()
+    if not access_token:
+        return False, "Gmail not configured or token refresh failed"
+
+    msg = MIMEMultipart()
+    msg["to"] = to_email
+    msg["subject"] = subject
+    msg.attach(MIMEText(body_text, "plain"))
+
+    if attachment_path and Path(attachment_path).exists():
+        with open(attachment_path, "rb") as f:
+            part = MIMEApplication(f.read(), _subtype="pdf")
+        part.add_header("Content-Disposition", "attachment", filename=Path(attachment_path).name)
+        msg.attach(part)
+
+    raw = base64.urlsafe_b64encode(msg.as_bytes()).decode("utf-8")
+
+    try:
+        req = Request(
+            GMAIL_DRAFTS_URL,
+            data=json.dumps({"message": {"raw": raw}}).encode("utf-8"),
+            method="POST",
+            headers={
+                "Authorization": f"Bearer {access_token}",
+                "Content-Type": "application/json",
+            },
+        )
+        with urlopen(req, timeout=30) as resp:
+            resp.read()
+        return True, None
+    except Exception as e:
+        return False, str(e)
 
 
 RULE_BASED_REJECT_THRESHOLD = 0.4
@@ -1190,6 +1328,89 @@ def send_telegram(pdf_path, company, title, url, score, job_id, reply_to_message
     except Exception as e:
         return False, str(e)
 
+
+def send_telegram_message(text):
+    """Send a plain-text Telegram message with no document attachment --
+    used for outreach-draft notifications, which have no PDF of their own
+    to send (the resume PDF already went out with the original tailoring
+    notification). Returns (True, None) on success, (False, error) on
+    failure, same shape as send_telegram.
+    """
+    if not TG_TOKEN or not TG_CHAT:
+        return False, "Telegram credentials not configured"
+    cmd = [
+        "curl", "-s", "-X", "POST",
+        f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
+        "-F", f"chat_id={TG_CHAT}",
+        "-F", f"text={text}",
+    ]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        resp = json.loads(result.stdout)
+        if resp.get("ok"):
+            return True, None
+        return False, f"Telegram API error: {resp.get('description', result.stdout)}"
+    except Exception as e:
+        return False, str(e)
+
+
+def run_outreach_step(job, jid, sector, jd_text, resume_text, pdf_path, founder_email_override=None):
+    """Attempt the founder-outreach draft for one already-tailored job.
+    Automatic path (founder_email_override=None): gated on outreach_status
+    being retryable (''/'failed', never re-attempted once terminally
+    skipped/drafted), then sector, then Apollo's employee-count/founder
+    gate. Manual override path (founder_email_override set, from a
+    Telegram reply or dashboard action): bypasses the status/sector/size
+    gate entirely and drafts straight to the given address -- the human
+    already made the qualifying judgment call.
+
+    Returns one of "skipped_sector"/"skipped_size"/"skipped_no_founder"/
+    "drafted"/"failed". Never raises -- any failure downstream of the
+    gate (LLM draft generation, Gmail API) resolves to "failed", which is
+    retryable on the next automatic pass (see Task 5/spec's retry fix).
+    """
+    if founder_email_override:
+        founder_name = ""
+        founder_email = founder_email_override
+    else:
+        current_status = get_outreach_status(jid)
+        if current_status not in ("", "failed"):
+            log(f"  Outreach status={current_status!r}, not auto-retrying")
+            return current_status
+        if not sector:
+            update_outreach_fields(jid, "skipped_sector")
+            return "skipped_sector"
+
+        apollo = apollo_lookup(job.get("company_name") or "")
+        if not apollo or apollo["employee_count"] is None or apollo["employee_count"] > MAX_OUTREACH_EMPLOYEES:
+            update_outreach_fields(jid, "skipped_size")
+            return "skipped_size"
+        if not apollo["founder_email"]:
+            update_outreach_fields(jid, "skipped_no_founder", apollo["founder_name"])
+            return "skipped_no_founder"
+
+        founder_name = apollo["founder_name"]
+        founder_email = apollo["founder_email"]
+
+    draft = draft_outreach_email(jd_text, resume_text, founder_name, job.get("title", ""), job.get("company_name", ""))
+    if not draft:
+        update_outreach_fields(jid, "failed", founder_name, founder_email)
+        return "failed"
+
+    ok, err = create_gmail_draft(founder_email, draft["subject"], draft["body"], pdf_path)
+    if not ok:
+        log(f"  Gmail draft failed: {err}")
+        update_outreach_fields(jid, "failed", founder_name, founder_email)
+        return "failed"
+
+    update_outreach_fields(jid, "drafted", founder_name, founder_email)
+    send_telegram_message(
+        f"Draft ready — {founder_name or founder_email} @ {job.get('company_name')}, "
+        f"{job.get('title')} — check Gmail Drafts. #J{jid}"
+    )
+    return "drafted"
+
+
 # -----------------------------------------------------------------------------
 # Main processing
 # -----------------------------------------------------------------------------
@@ -1646,6 +1867,12 @@ def process_job(job, tailored):
     tailored[jid]["telegram_error"] = None
     save_tailored(tailored)
     update_job_status(jid, "shortlisted")
+
+    try:
+        run_outreach_step(job, jid, judgment.get("sector"), jd_text, resume_text, str(pdf_path))
+    except Exception as e:
+        log(f"  WARN: outreach step raised unexpectedly: {e}")
+
     return tailored, "sent"
 
 
@@ -1776,5 +2003,39 @@ if __name__ == "__main__":
             print(f"PROCESS_JOB_FAILED: {_tailored.get(_job_id, {}).get('error', 'unknown error')}", file=sys.stderr)
             sys.exit(1)
         print(f"PROCESS_JOB_{_outcome.upper()}")
+    elif len(sys.argv) > 1 and sys.argv[1] == "--outreach":
+        if len(sys.argv) < 4 or sys.argv[2] != "--job-id":
+            print("Usage: tailor_resume.py --outreach --job-id <job_id> [--founder-email EMAIL]", file=sys.stderr)
+            sys.exit(1)
+        _job_id = sys.argv[3]
+        _founder_email = None
+        if len(sys.argv) > 5 and sys.argv[4] == "--founder-email":
+            _founder_email = sys.argv[5]
+
+        _conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
+        _conn.row_factory = sqlite3.Row
+        _row = _conn.execute("SELECT * FROM jobs WHERE id=?", (int(_job_id),)).fetchone()
+        _conn.close()
+        if not _row:
+            print(f"JOB_ID_NOT_FOUND: {_job_id}", file=sys.stderr)
+            sys.exit(1)
+        _job = dict(_row)
+
+        _tailored = load_tailored()
+        _entry = _tailored.get(_job_id)
+        if not _entry or _entry.get("status") != "done" or not _entry.get("pdf_path"):
+            print(f"OUTREACH_FAILED: job {_job_id} has no successfully tailored resume yet", file=sys.stderr)
+            sys.exit(1)
+
+        _resume_text = ""
+        if _entry.get("tex_path") and Path(_entry["tex_path"]).exists():
+            _resume_text = Path(_entry["tex_path"]).read_text(encoding="utf-8")
+        _jd_text, _ = fetch_jd_text_for_job(_job)
+        _sector = _entry.get("sector")
+
+        _outcome = run_outreach_step(_job, _job_id, _sector, _jd_text, _resume_text, _entry["pdf_path"], founder_email_override=_founder_email)
+        print(f"OUTREACH_{_outcome.upper()}")
+        if _outcome == "failed":
+            sys.exit(1)
     else:
         main()

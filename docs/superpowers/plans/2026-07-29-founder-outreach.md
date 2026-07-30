@@ -727,7 +727,7 @@ git commit -m "Add outreach_status DB read/write helpers"
 
 ### Task 6: Draft outreach email via LLM
 
-**Status (2026-07-29): deferred, not skipped permanently.** Tasks 1-5 merged to `master` as their own checkpoint; picking this up next in the "Gmail draft creation" continuation (tasks 6-8 together), using `founder_email_override` for the founder-email field per the Task 4 note above rather than blocking on an Apollo upgrade.
+**Status (2026-07-30): done**, committed `825c9c8`.
 
 **Files:**
 - Modify: `scripts/tailor_resume.py` (new constant + function after `apollo_lookup`)
@@ -736,7 +736,7 @@ git commit -m "Add outreach_status DB read/write helpers"
 **Interfaces:**
 - Produces: `draft_outreach_email(jd_text, resume_text, founder_name, title, company) -> {"subject": str, "body": str} | None`. Consumed by Task 9's `run_outreach_step`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add to `scripts/test_tailor_resume.py`:
 
@@ -770,12 +770,12 @@ def test_draft_outreach_email_returns_none_on_empty_subject_or_body(monkeypatch)
     assert tr.draft_outreach_email("JD text", "resume text", "Jane", "Backend Engineer", "Acme") is None
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python3 -m pytest scripts/test_tailor_resume.py -k draft_outreach_email -v`
 Expected: FAIL — `AttributeError: module 'tailor_resume' has no attribute 'draft_outreach_email'`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 Add near `DEFAULT_OPENCODE_MODEL` (line ~59):
 
@@ -833,12 +833,12 @@ def draft_outreach_email(jd_text, resume_text, founder_name, title, company):
     return {"subject": subject, "body": body}
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `python3 -m pytest scripts/test_tailor_resume.py -v`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd /home/dev-mayur/jobwatch/.claude/worktrees/reply-instructions
@@ -857,7 +857,7 @@ git commit -m "Add LLM-generated outreach email drafting"
 **Interfaces:**
 - Produces: `create_gmail_draft(to_email, subject, body_text, attachment_path=None) -> (ok: bool, error: str|None)`. Consumed by Task 9's `run_outreach_step`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add to `scripts/test_tailor_resume.py`:
 
@@ -925,12 +925,12 @@ def test_create_gmail_draft_returns_false_on_api_error(monkeypatch):
     assert "500" in err
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python3 -m pytest scripts/test_tailor_resume.py -k gmail -v`
 Expected: FAIL — `AttributeError: module 'tailor_resume' has no attribute '_gmail_access_token'`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 Add to the top-level imports in `scripts/tailor_resume.py` (near line 18, alongside the existing `from urllib.request import urlopen, Request`):
 
@@ -1026,12 +1026,12 @@ def create_gmail_draft(to_email, subject, body_text, attachment_path=None):
         return False, str(e)
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `python3 -m pytest scripts/test_tailor_resume.py -v`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd /home/dev-mayur/jobwatch/.claude/worktrees/reply-instructions
@@ -1052,7 +1052,7 @@ git commit -m "Add Gmail API draft creation via raw REST + stdlib email.mime"
 
 This task has no automated test (it's an interactive local script requiring a real browser + real Google Cloud OAuth credentials that don't exist yet per the spec's outstanding setup steps) — its own step 2 below is the verification, to be run once Mayur has done the Google Cloud Console steps.
 
-- [ ] **Step 1: Write the script**
+- [x] **Step 1: Write the script**
 
 Create `scripts/gmail_auth_setup.py`:
 
@@ -1159,7 +1159,7 @@ if __name__ == "__main__":
     main()
 ```
 
-- [ ] **Step 2: Manual verification (run once you've done the Google Cloud Console steps 1-3 above)**
+- [x] **Step 2: Manual verification (run once you've done the Google Cloud Console steps 1-3 above)** — done 2026-07-30. Real client_id/secret obtained; OAuth client type turned out to be **"Web application," not "Desktop app"** (despite the app name being "jobwatch") — Web app clients require every redirect URI whitelisted explicitly in Cloud Console (Desktop app clients auto-accept any `http://localhost:<port>`), so the flow first failed with `redirect_uri_mismatch` until `http://localhost:8765` was added under "Authorized redirect URIs". After that, consent flow succeeded, `GMAIL_REFRESH_TOKEN` minted, and `create_gmail_draft` was live-tested end-to-end (a real "safe to delete" draft was created in Mayur's actual Gmail) — confirmed working, not just token-minted. Credentials added to the laptop's `.env`; still need adding to the EC2 box's `.env` at deploy time (see CLAUDE.md gotcha).
 
 ```bash
 cd /home/dev-mayur/jobwatch
@@ -1170,7 +1170,7 @@ python3 scripts/gmail_auth_setup.py
 
 Confirm a browser tab opens, you approve access, and a `GMAIL_REFRESH_TOKEN` line prints. Add it plus `GMAIL_CLIENT_ID`/`GMAIL_CLIENT_SECRET`/`APOLLO_API_KEY` to both the laptop's `.env` and the EC2 box's `.env` (same pattern as `JOBWATCH_TG_TOKEN`).
 
-- [ ] **Step 3: Update `CLAUDE.md`**
+- [x] **Step 3: Update `CLAUDE.md`**
 
 Add to the "Recurring gotchas" section of `CLAUDE.md` (after the `OPENCODE_API_KEY` bullet):
 
@@ -1178,7 +1178,7 @@ Add to the "Recurring gotchas" section of `CLAUDE.md` (after the `OPENCODE_API_K
 - **Founder-outreach feature needs `APOLLO_API_KEY`/`GMAIL_CLIENT_ID`/`GMAIL_CLIENT_SECRET`/`GMAIL_REFRESH_TOKEN` in the server's `/opt/jobwatch/.env`**, not just the laptop's — same class of gotcha as `OPENCODE_API_KEY` above. Without Apollo configured, outreach silently skips every job as `skipped_sector`/`skipped_size` misses (no crash); without Gmail configured, a qualifying job's outreach step fails silently into `outreach_status='failed'` (retried next cycle, never surfaced unless you check `jobs.outreach_status` or `logs/cron.log` directly). Run `scripts/gmail_auth_setup.py` once locally to mint `GMAIL_REFRESH_TOKEN` (see `docs/superpowers/specs/2026-07-27-founder-outreach-design.md`).
 ```
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 cd /home/dev-mayur/jobwatch/.claude/worktrees/reply-instructions
@@ -1199,7 +1199,7 @@ git commit -m "Add one-time Gmail OAuth setup script and env-var docs"
 - Consumes: `get_outreach_status`/`update_outreach_fields` (Task 5), `apollo_lookup` (Task 4), `draft_outreach_email` (Task 6), `create_gmail_draft` (Task 7), `fetch_jd_text_for_job` (Task 3).
 - Produces: `run_outreach_step(job, jid, sector, jd_text, resume_text, pdf_path, founder_email_override=None) -> str` (one of `"skipped_sector"|"skipped_size"|"skipped_no_founder"|"drafted"|"failed"`). Consumed by Task 10's `outreach-one.sh`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add to `scripts/test_tailor_resume.py`:
 
@@ -1290,12 +1290,12 @@ def test_run_outreach_step_sends_telegram_notification_on_success(monkeypatch):
     assert "Acme" in notified[0]
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python3 -m pytest scripts/test_tailor_resume.py -k run_outreach_step -v`
 Expected: FAIL — `AttributeError: module 'tailor_resume' has no attribute 'run_outreach_step'`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 Add `send_telegram_message` right after `send_telegram` (line ~1091):
 
@@ -1432,12 +1432,12 @@ Add the CLI dispatch at the bottom of the file, in the `if __name__ == "__main__
             sys.exit(1)
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `python3 -m pytest scripts/test_tailor_resume.py -v`
 Expected: PASS — all new tests pass, and every pre-existing `process_job`/`main` test still passes (the outreach call is wrapped in `try/except`, so it can never change `process_job`'s existing "sent"/"failed"/"skipped_non_eng" return contract).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd /home/dev-mayur/jobwatch/.claude/worktrees/reply-instructions
@@ -1458,7 +1458,7 @@ git commit -m "Wire outreach step into process_job and add --outreach CLI entry 
 
 No automated test — this is a thin bash wrapper mirroring `scripts/tailor-one.sh` exactly; its correctness is exercised by Task 11/12's Go tests (which invoke a *fake* script) and by the manual end-to-end check in Task 14.
 
-- [ ] **Step 1: Create the script**
+- [x] **Step 1: Create the script**
 
 Create `scripts/outreach-one.sh`:
 
@@ -1502,12 +1502,12 @@ fi
 exec python3 "$SCRIPT_DIR/tailor_resume.py" "${ARGS[@]}"
 ```
 
-- [ ] **Step 2: Verify it's syntactically valid and executable**
+- [x] **Step 2: Verify it's syntactically valid and executable**
 
 Run: `chmod +x scripts/outreach-one.sh && bash -n scripts/outreach-one.sh && echo OK`
 Expected: `OK` (bash `-n` checks syntax without running it).
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 cd /home/dev-mayur/jobwatch/.claude/worktrees/reply-instructions
@@ -1527,7 +1527,7 @@ git commit -m "Add outreach-one.sh wrapper for manual outreach triggers"
 - Consumes: `scripts/outreach-one.sh <job_id> [founder_email]` (Task 10).
 - Produces: `Syncer.OutreachScript string` field; a `Syncer` with it set replies to an "outreach"/"outreach: email" reply on a job notification by shelling to that script.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add to `internal/tgsync/tgsync_test.go`:
 
@@ -1640,12 +1640,12 @@ func TestRunOutreachReportsScriptFailure(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd /home/dev-mayur/jobwatch/.claude/worktrees/reply-instructions && go test ./internal/tgsync/... -run TestParseOutreach -v`
 Expected: FAIL — `undefined: parseOutreach`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 Add `OutreachScript` to the `Syncer` struct in `internal/tgsync/tgsync.go` (right after `FixScript`, line ~60):
 
@@ -1747,12 +1747,12 @@ And update the `tgsync.New(...)` call (~line 198):
 	syncer := tgsync.New(st, tg, chatID, *fixScript, *outreachScript)
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `go test ./internal/tgsync/... -v && go build ./...`
 Expected: PASS, build succeeds (confirms `main.go`'s updated `New()` call compiles).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd /home/dev-mayur/jobwatch/.claude/worktrees/reply-instructions
@@ -1772,7 +1772,7 @@ git commit -m "Add outreach Telegram reply command (outreach / outreach: email)"
 - Consumes: `scripts/outreach-one.sh <job_id> [founder_email]` (Task 10), `store.JobRow`'s new fields (Task 1).
 - Produces: `POST /api/jobs/{id}/outreach` — `202 {"id": <id>}` on success, `400` on invalid id, `404` if job doesn't exist. Consumed by Task 13's frontend.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add to `internal/web/api_test.go`:
 
@@ -1834,12 +1834,12 @@ func TestHandleAPIJobsIncludesOutreachFields(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `go test ./internal/web/... -run TestHandleAPIJobsOutreach -v`
 Expected: FAIL — `404 page not found` (route doesn't exist yet).
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 Add fields to `apiJob` in `internal/web/api.go` (line ~17-27) and `toAPIJob`:
 
@@ -1962,12 +1962,12 @@ Register the route in `internal/web/server.go` (line ~44, after `PATCH /api/jobs
 	mux.HandleFunc("POST /api/jobs/{id}/outreach", s.handleAPIJobsOutreach)
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `go test ./internal/web/... -v && go build ./... && gofmt -l .`
 Expected: PASS, build succeeds, `gofmt -l .` prints nothing.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd /home/dev-mayur/jobwatch/.claude/worktrees/reply-instructions
@@ -1987,7 +1987,7 @@ git commit -m "Add POST /api/jobs/{id}/outreach dashboard trigger endpoint"
 
 No new automated test — this codebase has no frontend test suite (confirmed: no `*.test.tsx`/`*.spec.tsx` files, verification is `tsc`/`oxlint`/`vite build` + manual click-through, same as the 2026-07-27 jobs-filter-upgrade task). Steps 2-3 below are that same verification.
 
-- [ ] **Step 1: Implement**
+- [x] **Step 1: Implement**
 
 In `frontend/src/api.ts`, add fields to `Job` (line ~1-11):
 
@@ -2077,7 +2077,7 @@ Add a new `<th>Outreach</th>` to the table header (line ~211, after `<th>Notes</
 
 Update the header row's `colSpan={6}` (empty-state row, line ~232) to `colSpan={7}` to match the new column count.
 
-- [ ] **Step 2: Type-check and build**
+- [x] **Step 2: Type-check and build**
 
 ```bash
 cd /home/dev-mayur/jobwatch/.claude/worktrees/reply-instructions/frontend
@@ -2088,11 +2088,11 @@ npm run build
 
 Expected: all three clean/succeed, no type errors.
 
-- [ ] **Step 3: Manual click-through** (once the Go backend from Task 12 is running locally)
+- [x] **Step 3: Manual click-through** (once the Go backend from Task 12 is running locally)
 
 Start the dashboard locally, open the Jobs page, confirm: the new "Outreach" column renders for every row, typing an email into the override box and clicking "Draft outreach" fires the request (check Network tab for `202`), and a row with `outreachStatus: "drafted"` (you can set this manually via `sqlite3 jobwatch.db "UPDATE jobs SET outreach_status='drafted', founder_name='Test Founder' WHERE id=1"` for a quick visual check) renders the "Drafted — ..." state instead of the button.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 cd /home/dev-mayur/jobwatch/.claude/worktrees/reply-instructions
@@ -2106,7 +2106,9 @@ git commit -m "Add Draft outreach action and outreach status column to Jobs page
 
 No code changes — this is the final real-world check, matching this project's established convention (see `HANDOFF.md`'s "Verification habits" and `feedback: verify_generated_output`) of confirming against the real system, not just green tests, before calling a feature done.
 
-- [ ] **Step 1: Full pipeline dry run against one real job**
+**Result (2026-07-30):** ran against real job #9684 (Weave, "Founding AI Engineer") in the real prod DB. Migration applied cleanly (via a throwaway `cmd/migrate_only` binary, since the main checkout's `bin/jobwatch` hadn't been rebuilt yet — deleted immediately after). Automatic path correctly gated `skipped_sector` (job predates sector classification, expected). Override path (`founder_email_override="mayat.dev1569@gmail.com"`) hit a real bug: **`draft_outreach_email`'s hardcoded `timeout=20` was too tight** — the real JD+resume-sized OpenCode call took ~35s (measured directly), so it failed twice with a timeout before the root cause was found. `llm_judge` sends similarly-sized prompts at the same 20s default and gets away with it only because it has a rule-based fallback on timeout; `draft_outreach_email` has no fallback by design, so it needed real headroom. Fixed: bumped to `timeout=45`. Retested — **outcome: "drafted"**, confirmed via a direct Gmail API call: real draft exists, `To: mayat.dev1569@gmail.com`, `Subject: "Founding AI Engineer at Weave — AI + Go experience"`, `multipart/mixed` (PDF attached). DB row updated correctly (`outreach_status='drafted'`, `outreach_drafted_at` set).
+
+- [x] **Step 1: Full pipeline dry run against one real job**
 
 In the main repo root (`/home/dev-mayur/jobwatch`, which has `.env` and the real DB):
 
@@ -2123,14 +2125,8 @@ Confirm: the existing tailoring/Telegram flow still works exactly as before (no 
 sqlite3 jobwatch.db "SELECT id, outreach_status, founder_name, founder_email FROM jobs WHERE id=<job id>;"
 ```
 
-- [ ] **Step 2: Confirm a real Gmail draft appears (once Task 8's OAuth setup is done)**
+- [x] **Step 2: Confirm a real Gmail draft appears (once Task 8's OAuth setup is done)** — done, see result note above.
 
-Check the Gmail account's Drafts folder directly — confirm a draft exists with the expected founder's email as recipient, a personalized subject/body, and the tailored resume PDF attached. This is the one part of the feature no unit test can substitute for (per project convention: compile/render or a live API call before claiming done).
+- [ ] **Step 3: Confirm the Telegram reply path** — not done; needs a live human reply to a real Telegram notification (Claude can't do this). Reply "outreach" to a job's tailoring notification and confirm the ack + eventual result arrive. Go-side argv-passing is already unit-tested (`TestRunOutreachInvokesScriptWithJobIDAndEmail`), and the Python side it shells out to is now live-verified (Step 1/2) — this step is the last real-device confirmation, not a blocker for shipping.
 
-- [ ] **Step 3: Confirm the Telegram reply path**
-
-Reply "outreach" to that job's original tailoring notification in Telegram. Confirm the immediate ack ("Looking up founder / drafting outreach…") arrives, followed by either the "Draft ready" notification or a clear failure message.
-
-- [ ] **Step 4: Confirm the dashboard path**
-
-From the Jobs page, click "Draft outreach" (with an email override) on a different job. Confirm the request succeeds and, after the script finishes, the row's `outreach_status` updates on the next page refresh.
+- [x] **Step 4: Confirm the dashboard path** — done via a real Playwright browser click-through against a seeded local server (see Task 13's verification): typed an override email, clicked "Draft outreach", confirmed `202` response and the "Queued — check Gmail Drafts / Telegram" status message rendered. Not run against a live production job specifically, but the same code path Step 1/2 already proved end-to-end.

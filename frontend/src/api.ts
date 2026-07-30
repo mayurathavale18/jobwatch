@@ -9,6 +9,10 @@ export interface Job {
   firstSeenAt: string
   status: string
   notes: string
+  outreachStatus: string
+  founderName: string
+  founderEmail: string
+  outreachDraftedAt: string
 }
 
 export interface PollRun {
@@ -100,4 +104,13 @@ export async function submitManualJob(url: string, jdText?: string): Promise<Man
   })
   if (!res.ok) throw new Error(`POST /api/jobs/manual: ${res.status}`)
   return res.json()
+}
+
+export async function triggerOutreach(id: number, founderEmail?: string): Promise<void> {
+  const res = await fetch(`/api/jobs/${id}/outreach`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(founderEmail ? { founderEmail } : {}),
+  })
+  if (!res.ok) throw new Error(`POST /api/jobs/${id}/outreach: ${res.status}`)
 }

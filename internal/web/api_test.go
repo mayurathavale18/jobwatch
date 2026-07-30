@@ -377,3 +377,59 @@ func TestHandleAPIJobsManualPersistsJDText(t *testing.T) {
 		t.Errorf("ManualJDText = %q, want trimmed JD text", got.ManualJDText)
 	}
 }
+
+func TestHandleAPIJobsOutreachTriggersScript(t *testing.T) {
+	srv, st := newTestServer(t)
+	srv.logsDir = t.TempDir() // see comment in TestHandleAPIJobsManualInsertsAndTriggersOneOff
+	id := insertTestJob(t, st)
+
+	body := strings.NewReader(`{"founderEmail":"jane@acme.xyz"}`)
+	req := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/jobs/%d/outreach", id), body)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202, body: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestHandleAPIJobsOutreachRejectsInvalidID(t *testing.T) {
+	srv, _ := newTestServer(t)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/jobs/notanumber/outreach", nil)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", w.Code)
+	}
+}
+
+func TestHandleAPIJobsOutreachRejects404ForMissingJob(t *testing.T) {
+	srv, _ := newTestServer(t)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/jobs/999/outreach", nil)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", w.Code)
+	}
+}
+
+func TestHandleAPIJobsIncludesOutreachFields(t *testing.T) {
+	srv, st := newTestServer(t)
+	insertTestJob(t, st)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/jobs", nil)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	var resp apiJobsResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(resp.Jobs) != 1 || resp.Jobs[0].OutreachStatus != "" {
+		t.Errorf("Jobs[0].OutreachStatus = %q, want empty string by default", resp.Jobs[0].OutreachStatus)
+	}
+}

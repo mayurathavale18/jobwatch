@@ -174,6 +174,8 @@ func runTgSync(args []string) error {
 	fs := flag.NewFlagSet("tg-sync", flag.ExitOnError)
 	fixScript := fs.String("fix-script", "scripts/resume-fix.sh",
 		"path to the script invoked when a user replies \"fix\" to a job notification (empty disables the feature)")
+	outreachScript := fs.String("outreach-script", "scripts/outreach-one.sh",
+		"path to the script invoked when a user replies \"outreach\" to a job notification (empty disables the feature)")
 	cfg, err := loadConfigFlag(fs, args)
 	if err != nil {
 		return err
@@ -195,7 +197,7 @@ func runTgSync(args []string) error {
 		return fmt.Errorf("telegram chat id %q is not numeric: %w", cfg.ChatID(), err)
 	}
 
-	syncer := tgsync.New(st, tg, chatID, *fixScript)
+	syncer := tgsync.New(st, tg, chatID, *fixScript, *outreachScript)
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()

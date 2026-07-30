@@ -59,13 +59,21 @@ type Syncer struct {
 	// before the other ever sees it.
 	FixScript string
 
+	// OutreachScript is the executable invoked when a user replies
+	// "outreach" or "outreach: <email>" to a job notification:
+	// `OutreachScript <job_id> [<founder_email>]`. Looks up a founder
+	// (or uses the given email override) and creates a personalized
+	// Gmail draft. Empty disables the feature (replies explaining it
+	// isn't configured), same convention as FixScript.
+	OutreachScript string
+
 	// Pages fetches manually-submitted job URLs' titles. Defaults to a real
 	// HTTP fetcher; overridable for tests.
 	Pages jobsubmit.PageFetcher
 }
 
-func New(st *store.Store, tg *notify.Telegram, chatID int64, fixScript string) *Syncer {
-	return &Syncer{Store: st, TG: tg, ChatID: chatID, FixScript: fixScript, Pages: jobsubmit.HTTPPageFetcher{}}
+func New(st *store.Store, tg *notify.Telegram, chatID int64, fixScript string, outreachScript string) *Syncer {
+	return &Syncer{Store: st, TG: tg, ChatID: chatID, FixScript: fixScript, OutreachScript: outreachScript, Pages: jobsubmit.HTTPPageFetcher{}}
 }
 
 // Result summarizes one sync run.
@@ -205,6 +213,13 @@ func (s *Syncer) processUpdate(ctx context.Context, upd notify.Update) (bool, er
 		return false, s.TG.Reply(ctx, msg.MessageID, fmt.Sprintf("✓ Note added — %s — %s", job.CompanyName, job.Title))
 	}
 
+	if email, ok := parseOutreach(text); ok {
+		if err := tx.Rollback(); err != nil && err != sql.ErrTxDone {
+			return false, err
+		}
+		return false, s.runOutreach(ctx, jobID, msg.MessageID, email)
+	}
+
 	fields := strings.Fields(lower)
 	var firstWord string
 	if len(fields) > 0 {
@@ -245,6 +260,23 @@ func ParseStatusKeyword(word string) (string, bool) {
 	default:
 		return "", false
 	}
+}
+
+// outreachRe matches a bare "outreach" reply or "outreach: <email>" with
+// an explicit founder-email override -- optional whitespace around the
+// colon, same convention as fixOrUpdateRe.
+var outreachRe = regexp.MustCompile(`(?is)^outreach\s*(?::\s*(\S+))?\s*$`)
+
+// parseOutreach recognizes an "outreach"/"outreach: <email>" reply. It
+// reports the email override (empty for a bare "outreach", meaning "use
+// the automatic Apollo lookup") and whether text matched this command at
+// all.
+func parseOutreach(text string) (email string, ok bool) {
+	m := outreachRe.FindStringSubmatch(strings.TrimSpace(text))
+	if m == nil {
+		return "", false
+	}
+	return m[1], true
 }
 
 // fixOrUpdateRe matches a "fix:"/"update:" reply carrying free-text edit
@@ -317,6 +349,37 @@ func (s *Syncer) runFix(ctx context.Context, jobID int64, replyToMessageID int64
 	if err != nil {
 		slog.Error("tg-sync: fix script failed", "job_id", jobID, "mode", mode, "error", err, "output", string(output))
 		return s.TG.Reply(ctx, replyToMessageID, fmt.Sprintf("Fix failed for #J%d: %s", jobID, lastLine(string(output))))
+	}
+	return nil
+}
+
+// runOutreach invokes OutreachScript to look up a founder (or use the
+// given email override) and create a Gmail draft. Mirrors runFix's
+// ack-then-background-script pattern: the actual "draft ready" success
+// notification comes from tailor_resume.py's own Telegram send inside
+// run_outreach_step, not from this reply -- this only acks immediately
+// and reports a failure if the script errors.
+func (s *Syncer) runOutreach(ctx context.Context, jobID int64, replyToMessageID int64, founderEmail string) error {
+	if s.OutreachScript == "" {
+		return s.TG.Reply(ctx, replyToMessageID, "Outreach isn't configured on this install.")
+	}
+
+	if err := s.TG.Reply(ctx, replyToMessageID, "Looking up founder / drafting outreach…"); err != nil {
+		return err
+	}
+
+	outreachCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
+	defer cancel()
+
+	args := []string{strconv.FormatInt(jobID, 10)}
+	if founderEmail != "" {
+		args = append(args, founderEmail)
+	}
+	cmd := exec.CommandContext(outreachCtx, s.OutreachScript, args...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		slog.Error("tg-sync: outreach script failed", "job_id", jobID, "error", err, "output", string(output))
+		return s.TG.Reply(ctx, replyToMessageID, fmt.Sprintf("Outreach failed for #J%d: %s", jobID, lastLine(string(output))))
 	}
 	return nil
 }
