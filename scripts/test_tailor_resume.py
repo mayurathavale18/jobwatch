@@ -1192,3 +1192,32 @@ def test_update_outreach_fields_leaves_drafted_at_empty_for_non_drafted_status(m
     row = conn.execute("SELECT outreach_drafted_at FROM jobs WHERE id = 1").fetchone()
     conn.close()
     assert row[0] == ""
+
+
+def test_draft_outreach_email_returns_subject_and_body(monkeypatch):
+    monkeypatch.setattr(
+        tr, "call_opencode",
+        lambda system_prompt, user_content, model=tr.OUTREACH_EMAIL_MODEL, timeout=20:
+            '{"subject": "Backend Engineer role", "body": "Hi Jane, ..."}',
+    )
+    result = tr.draft_outreach_email("JD text", "resume text", "Jane", "Backend Engineer", "Acme")
+    assert result == {"subject": "Backend Engineer role", "body": "Hi Jane, ..."}
+
+
+def test_draft_outreach_email_returns_none_on_llm_failure(monkeypatch):
+    monkeypatch.setattr(tr, "call_opencode", lambda *a, **k: None)
+    assert tr.draft_outreach_email("JD text", "resume text", "Jane", "Backend Engineer", "Acme") is None
+
+
+def test_draft_outreach_email_returns_none_on_malformed_json(monkeypatch):
+    monkeypatch.setattr(tr, "call_opencode", lambda *a, **k: "not json")
+    assert tr.draft_outreach_email("JD text", "resume text", "Jane", "Backend Engineer", "Acme") is None
+
+
+def test_draft_outreach_email_returns_none_on_empty_subject_or_body(monkeypatch):
+    monkeypatch.setattr(
+        tr, "call_opencode",
+        lambda system_prompt, user_content, model=tr.OUTREACH_EMAIL_MODEL, timeout=20:
+            '{"subject": "", "body": "Hi Jane, ..."}',
+    )
+    assert tr.draft_outreach_email("JD text", "resume text", "Jane", "Backend Engineer", "Acme") is None

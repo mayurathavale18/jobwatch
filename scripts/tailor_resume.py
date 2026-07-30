@@ -58,6 +58,12 @@ OPENCODE_API_KEY = os.environ.get("OPENCODE_API_KEY", "")
 OPENCODE_BASE_URL = "https://opencode.ai/zen/go/v1"
 DEFAULT_OPENCODE_MODEL = "deepseek-v4-pro"
 
+# Separate, independently-swappable model for outreach-email drafting --
+# same OpenCode Go gateway/subscription as tailoring's LLM calls, but its
+# own named constant so it can be pointed at a cheaper model later
+# without touching the (much higher-volume) tailoring/verdict call.
+OUTREACH_EMAIL_MODEL = DEFAULT_OPENCODE_MODEL
+
 # Apollo.io: used only for the founder-outreach feature's employee-count
 # and named-founder-email lookup -- company NAME search only (no domain
 # resolution attempted; Greenhouse/Ashby postings live on the ATS's own
@@ -323,6 +329,49 @@ def apollo_lookup(company_name):
             founder_email = email
 
     return {"employee_count": employee_count, "founder_name": founder_name, "founder_email": founder_email}
+
+
+def draft_outreach_email(jd_text, resume_text, founder_name, title, company):
+    """Generate a short, personalized cold-outreach email from the
+    candidate to a startup founder, referencing concrete JD/resume
+    overlap. Returns {"subject": str, "body": str} on success, None on
+    any LLM failure or malformed/empty response -- callers must skip
+    (never fall back to a generic template; a non-personalized "draft"
+    isn't worth creating, see spec's Error handling section).
+    """
+    raw = call_opencode(
+        system_prompt=(
+            "You write short, genuine-sounding cold outreach emails from "
+            "a software engineer job candidate directly to a startup "
+            f"founder. The candidate is applying for a {title} role at "
+            f"{company}. Reference one or two concrete points from the "
+            "job description and the candidate's resume that make them a "
+            "good fit -- do not invent any experience not present in the "
+            "resume text. Keep it under 150 words, no generic flattery, "
+            "no 'I hope this email finds you well'. Respond with ONLY "
+            "valid JSON, no markdown fences, no commentary, in this "
+            'exact shape: {"subject": "...", "body": "..."}'
+        ),
+        user_content=(
+            f"FOUNDER NAME: {founder_name or 'there'}\n\n"
+            f"JOB DESCRIPTION:\n{jd_text}\n\nRESUME:\n{resume_text}"
+        ),
+        model=OUTREACH_EMAIL_MODEL,
+        timeout=20,
+    )
+    if not raw:
+        return None
+    try:
+        parsed = json.loads(raw.strip().strip("`").removeprefix("json").strip())
+    except (json.JSONDecodeError, AttributeError):
+        log("WARN: draft_outreach_email got malformed JSON from OpenCode")
+        return None
+
+    subject = str(parsed.get("subject", "")).strip()
+    body = str(parsed.get("body", "")).strip()
+    if not subject or not body:
+        return None
+    return {"subject": subject, "body": body}
 
 
 RULE_BASED_REJECT_THRESHOLD = 0.4
