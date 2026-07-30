@@ -1321,6 +1321,89 @@ def send_telegram(pdf_path, company, title, url, score, job_id, reply_to_message
     except Exception as e:
         return False, str(e)
 
+
+def send_telegram_message(text):
+    """Send a plain-text Telegram message with no document attachment --
+    used for outreach-draft notifications, which have no PDF of their own
+    to send (the resume PDF already went out with the original tailoring
+    notification). Returns (True, None) on success, (False, error) on
+    failure, same shape as send_telegram.
+    """
+    if not TG_TOKEN or not TG_CHAT:
+        return False, "Telegram credentials not configured"
+    cmd = [
+        "curl", "-s", "-X", "POST",
+        f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
+        "-F", f"chat_id={TG_CHAT}",
+        "-F", f"text={text}",
+    ]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        resp = json.loads(result.stdout)
+        if resp.get("ok"):
+            return True, None
+        return False, f"Telegram API error: {resp.get('description', result.stdout)}"
+    except Exception as e:
+        return False, str(e)
+
+
+def run_outreach_step(job, jid, sector, jd_text, resume_text, pdf_path, founder_email_override=None):
+    """Attempt the founder-outreach draft for one already-tailored job.
+    Automatic path (founder_email_override=None): gated on outreach_status
+    being retryable (''/'failed', never re-attempted once terminally
+    skipped/drafted), then sector, then Apollo's employee-count/founder
+    gate. Manual override path (founder_email_override set, from a
+    Telegram reply or dashboard action): bypasses the status/sector/size
+    gate entirely and drafts straight to the given address -- the human
+    already made the qualifying judgment call.
+
+    Returns one of "skipped_sector"/"skipped_size"/"skipped_no_founder"/
+    "drafted"/"failed". Never raises -- any failure downstream of the
+    gate (LLM draft generation, Gmail API) resolves to "failed", which is
+    retryable on the next automatic pass (see Task 5/spec's retry fix).
+    """
+    if founder_email_override:
+        founder_name = ""
+        founder_email = founder_email_override
+    else:
+        current_status = get_outreach_status(jid)
+        if current_status not in ("", "failed"):
+            log(f"  Outreach status={current_status!r}, not auto-retrying")
+            return current_status
+        if not sector:
+            update_outreach_fields(jid, "skipped_sector")
+            return "skipped_sector"
+
+        apollo = apollo_lookup(job.get("company_name") or "")
+        if not apollo or apollo["employee_count"] is None or apollo["employee_count"] > MAX_OUTREACH_EMPLOYEES:
+            update_outreach_fields(jid, "skipped_size")
+            return "skipped_size"
+        if not apollo["founder_email"]:
+            update_outreach_fields(jid, "skipped_no_founder", apollo["founder_name"])
+            return "skipped_no_founder"
+
+        founder_name = apollo["founder_name"]
+        founder_email = apollo["founder_email"]
+
+    draft = draft_outreach_email(jd_text, resume_text, founder_name, job.get("title", ""), job.get("company_name", ""))
+    if not draft:
+        update_outreach_fields(jid, "failed", founder_name, founder_email)
+        return "failed"
+
+    ok, err = create_gmail_draft(founder_email, draft["subject"], draft["body"], pdf_path)
+    if not ok:
+        log(f"  Gmail draft failed: {err}")
+        update_outreach_fields(jid, "failed", founder_name, founder_email)
+        return "failed"
+
+    update_outreach_fields(jid, "drafted", founder_name, founder_email)
+    send_telegram_message(
+        f"Draft ready — {founder_name or founder_email} @ {job.get('company_name')}, "
+        f"{job.get('title')} — check Gmail Drafts. #J{jid}"
+    )
+    return "drafted"
+
+
 # -----------------------------------------------------------------------------
 # Main processing
 # -----------------------------------------------------------------------------
@@ -1777,6 +1860,12 @@ def process_job(job, tailored):
     tailored[jid]["telegram_error"] = None
     save_tailored(tailored)
     update_job_status(jid, "shortlisted")
+
+    try:
+        run_outreach_step(job, jid, judgment.get("sector"), jd_text, resume_text, str(pdf_path))
+    except Exception as e:
+        log(f"  WARN: outreach step raised unexpectedly: {e}")
+
     return tailored, "sent"
 
 
@@ -1907,5 +1996,39 @@ if __name__ == "__main__":
             print(f"PROCESS_JOB_FAILED: {_tailored.get(_job_id, {}).get('error', 'unknown error')}", file=sys.stderr)
             sys.exit(1)
         print(f"PROCESS_JOB_{_outcome.upper()}")
+    elif len(sys.argv) > 1 and sys.argv[1] == "--outreach":
+        if len(sys.argv) < 4 or sys.argv[2] != "--job-id":
+            print("Usage: tailor_resume.py --outreach --job-id <job_id> [--founder-email EMAIL]", file=sys.stderr)
+            sys.exit(1)
+        _job_id = sys.argv[3]
+        _founder_email = None
+        if len(sys.argv) > 5 and sys.argv[4] == "--founder-email":
+            _founder_email = sys.argv[5]
+
+        _conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
+        _conn.row_factory = sqlite3.Row
+        _row = _conn.execute("SELECT * FROM jobs WHERE id=?", (int(_job_id),)).fetchone()
+        _conn.close()
+        if not _row:
+            print(f"JOB_ID_NOT_FOUND: {_job_id}", file=sys.stderr)
+            sys.exit(1)
+        _job = dict(_row)
+
+        _tailored = load_tailored()
+        _entry = _tailored.get(_job_id)
+        if not _entry or _entry.get("status") != "done" or not _entry.get("pdf_path"):
+            print(f"OUTREACH_FAILED: job {_job_id} has no successfully tailored resume yet", file=sys.stderr)
+            sys.exit(1)
+
+        _resume_text = ""
+        if _entry.get("tex_path") and Path(_entry["tex_path"]).exists():
+            _resume_text = Path(_entry["tex_path"]).read_text(encoding="utf-8")
+        _jd_text, _ = fetch_jd_text_for_job(_job)
+        _sector = _entry.get("sector")
+
+        _outcome = run_outreach_step(_job, _job_id, _sector, _jd_text, _resume_text, _entry["pdf_path"], founder_email_override=_founder_email)
+        print(f"OUTREACH_{_outcome.upper()}")
+        if _outcome == "failed":
+            sys.exit(1)
     else:
         main()
