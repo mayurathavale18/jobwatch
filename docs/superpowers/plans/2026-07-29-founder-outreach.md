@@ -727,7 +727,7 @@ git commit -m "Add outreach_status DB read/write helpers"
 
 ### Task 6: Draft outreach email via LLM
 
-**Status (2026-07-29): deferred, not skipped permanently.** Tasks 1-5 merged to `master` as their own checkpoint; picking this up next in the "Gmail draft creation" continuation (tasks 6-8 together), using `founder_email_override` for the founder-email field per the Task 4 note above rather than blocking on an Apollo upgrade.
+**Status (2026-07-30): done**, committed `825c9c8`.
 
 **Files:**
 - Modify: `scripts/tailor_resume.py` (new constant + function after `apollo_lookup`)
@@ -736,7 +736,7 @@ git commit -m "Add outreach_status DB read/write helpers"
 **Interfaces:**
 - Produces: `draft_outreach_email(jd_text, resume_text, founder_name, title, company) -> {"subject": str, "body": str} | None`. Consumed by Task 9's `run_outreach_step`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add to `scripts/test_tailor_resume.py`:
 
@@ -770,12 +770,12 @@ def test_draft_outreach_email_returns_none_on_empty_subject_or_body(monkeypatch)
     assert tr.draft_outreach_email("JD text", "resume text", "Jane", "Backend Engineer", "Acme") is None
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python3 -m pytest scripts/test_tailor_resume.py -k draft_outreach_email -v`
 Expected: FAIL — `AttributeError: module 'tailor_resume' has no attribute 'draft_outreach_email'`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 Add near `DEFAULT_OPENCODE_MODEL` (line ~59):
 
@@ -833,12 +833,12 @@ def draft_outreach_email(jd_text, resume_text, founder_name, title, company):
     return {"subject": subject, "body": body}
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `python3 -m pytest scripts/test_tailor_resume.py -v`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd /home/dev-mayur/jobwatch/.claude/worktrees/reply-instructions
@@ -857,7 +857,7 @@ git commit -m "Add LLM-generated outreach email drafting"
 **Interfaces:**
 - Produces: `create_gmail_draft(to_email, subject, body_text, attachment_path=None) -> (ok: bool, error: str|None)`. Consumed by Task 9's `run_outreach_step`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add to `scripts/test_tailor_resume.py`:
 
@@ -925,12 +925,12 @@ def test_create_gmail_draft_returns_false_on_api_error(monkeypatch):
     assert "500" in err
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python3 -m pytest scripts/test_tailor_resume.py -k gmail -v`
 Expected: FAIL — `AttributeError: module 'tailor_resume' has no attribute '_gmail_access_token'`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 Add to the top-level imports in `scripts/tailor_resume.py` (near line 18, alongside the existing `from urllib.request import urlopen, Request`):
 
@@ -1026,12 +1026,12 @@ def create_gmail_draft(to_email, subject, body_text, attachment_path=None):
         return False, str(e)
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `python3 -m pytest scripts/test_tailor_resume.py -v`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd /home/dev-mayur/jobwatch/.claude/worktrees/reply-instructions
@@ -1052,7 +1052,7 @@ git commit -m "Add Gmail API draft creation via raw REST + stdlib email.mime"
 
 This task has no automated test (it's an interactive local script requiring a real browser + real Google Cloud OAuth credentials that don't exist yet per the spec's outstanding setup steps) — its own step 2 below is the verification, to be run once Mayur has done the Google Cloud Console steps.
 
-- [ ] **Step 1: Write the script**
+- [x] **Step 1: Write the script**
 
 Create `scripts/gmail_auth_setup.py`:
 
@@ -1159,7 +1159,7 @@ if __name__ == "__main__":
     main()
 ```
 
-- [ ] **Step 2: Manual verification (run once you've done the Google Cloud Console steps 1-3 above)**
+- [ ] **Step 2: Manual verification (run once you've done the Google Cloud Console steps 1-3 above)** — blocked as of 2026-07-30: the key added to `creds.yml` was a plain API key (`AIzaSy...`), not an OAuth Client ID. Gmail draft creation needs OAuth (user consent), which a bare API key cannot provide — need the "Desktop app" OAuth Client ID + Secret instead.
 
 ```bash
 cd /home/dev-mayur/jobwatch
@@ -1170,7 +1170,7 @@ python3 scripts/gmail_auth_setup.py
 
 Confirm a browser tab opens, you approve access, and a `GMAIL_REFRESH_TOKEN` line prints. Add it plus `GMAIL_CLIENT_ID`/`GMAIL_CLIENT_SECRET`/`APOLLO_API_KEY` to both the laptop's `.env` and the EC2 box's `.env` (same pattern as `JOBWATCH_TG_TOKEN`).
 
-- [ ] **Step 3: Update `CLAUDE.md`**
+- [x] **Step 3: Update `CLAUDE.md`**
 
 Add to the "Recurring gotchas" section of `CLAUDE.md` (after the `OPENCODE_API_KEY` bullet):
 
@@ -1178,7 +1178,7 @@ Add to the "Recurring gotchas" section of `CLAUDE.md` (after the `OPENCODE_API_K
 - **Founder-outreach feature needs `APOLLO_API_KEY`/`GMAIL_CLIENT_ID`/`GMAIL_CLIENT_SECRET`/`GMAIL_REFRESH_TOKEN` in the server's `/opt/jobwatch/.env`**, not just the laptop's — same class of gotcha as `OPENCODE_API_KEY` above. Without Apollo configured, outreach silently skips every job as `skipped_sector`/`skipped_size` misses (no crash); without Gmail configured, a qualifying job's outreach step fails silently into `outreach_status='failed'` (retried next cycle, never surfaced unless you check `jobs.outreach_status` or `logs/cron.log` directly). Run `scripts/gmail_auth_setup.py` once locally to mint `GMAIL_REFRESH_TOKEN` (see `docs/superpowers/specs/2026-07-27-founder-outreach-design.md`).
 ```
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 cd /home/dev-mayur/jobwatch/.claude/worktrees/reply-instructions
