@@ -1527,7 +1527,7 @@ git commit -m "Add outreach-one.sh wrapper for manual outreach triggers"
 - Consumes: `scripts/outreach-one.sh <job_id> [founder_email]` (Task 10).
 - Produces: `Syncer.OutreachScript string` field; a `Syncer` with it set replies to an "outreach"/"outreach: email" reply on a job notification by shelling to that script.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add to `internal/tgsync/tgsync_test.go`:
 
@@ -1640,12 +1640,12 @@ func TestRunOutreachReportsScriptFailure(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd /home/dev-mayur/jobwatch/.claude/worktrees/reply-instructions && go test ./internal/tgsync/... -run TestParseOutreach -v`
 Expected: FAIL — `undefined: parseOutreach`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 Add `OutreachScript` to the `Syncer` struct in `internal/tgsync/tgsync.go` (right after `FixScript`, line ~60):
 
@@ -1747,12 +1747,12 @@ And update the `tgsync.New(...)` call (~line 198):
 	syncer := tgsync.New(st, tg, chatID, *fixScript, *outreachScript)
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `go test ./internal/tgsync/... -v && go build ./...`
 Expected: PASS, build succeeds (confirms `main.go`'s updated `New()` call compiles).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd /home/dev-mayur/jobwatch/.claude/worktrees/reply-instructions
