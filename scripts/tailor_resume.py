@@ -452,13 +452,17 @@ def _gmail_access_token():
 
 def create_gmail_draft(to_email, subject, body_text, attachment_path=None):
     """Create a Gmail draft (never sends) via the Gmail API. Returns
-    (True, None) on success, (False, error_message) on any failure --
-    callers must treat failure as retryable (outreach_status='failed'),
-    never crash the caller's own flow.
+    (True, None, draft_link) on success, (False, error_message, None) on
+    any failure -- callers must treat failure as retryable
+    (outreach_status='failed'), never crash the caller's own flow.
+    draft_link is a deep link to the exact draft (built from the created
+    message's id, not the draft id) -- None if the API response didn't
+    parse as expected, since a missing link is a display nicety, not a
+    reason to treat draft creation as failed.
     """
     access_token = _gmail_access_token()
     if not access_token:
-        return False, "Gmail not configured or token refresh failed"
+        return False, "Gmail not configured or token refresh failed", None
 
     msg = MIMEMultipart()
     msg["to"] = to_email
@@ -484,10 +488,16 @@ def create_gmail_draft(to_email, subject, body_text, attachment_path=None):
             },
         )
         with urlopen(req, timeout=30) as resp:
-            resp.read()
-        return True, None
+            body = resp.read()
+        message_id = None
+        try:
+            message_id = json.loads(body).get("message", {}).get("id")
+        except (json.JSONDecodeError, AttributeError):
+            pass
+        link = f"https://mail.google.com/mail/u/0/#all/{message_id}" if message_id else None
+        return True, None, link
     except Exception as e:
-        return False, str(e)
+        return False, str(e), None
 
 
 RULE_BASED_REJECT_THRESHOLD = 0.4
@@ -1438,16 +1448,17 @@ def run_outreach_step(job, jid, sector, jd_text, resume_text, pdf_path, founder_
         update_outreach_fields(jid, "failed", founder_name, founder_email)
         return "failed"
 
-    ok, err = create_gmail_draft(founder_email, draft["subject"], draft["body"], pdf_path)
+    ok, err, draft_link = create_gmail_draft(founder_email, draft["subject"], draft["body"], pdf_path)
     if not ok:
         log(f"  Gmail draft failed: {err}")
         update_outreach_fields(jid, "failed", founder_name, founder_email)
         return "failed"
 
     update_outreach_fields(jid, "drafted", founder_name, founder_email)
+    link_suffix = f" — {draft_link}" if draft_link else " — check Gmail Drafts"
     send_telegram_message(
         f"Draft ready — {founder_name or founder_email} @ {job.get('company_name')}, "
-        f"{job.get('title')} — check Gmail Drafts. #J{jid}"
+        f"{job.get('title')}{link_suffix}. #J{jid}"
     )
     return "drafted"
 

@@ -1278,9 +1278,10 @@ def test_gmail_access_token_returns_token_on_success(monkeypatch):
 
 def test_create_gmail_draft_returns_false_without_token(monkeypatch):
     monkeypatch.setattr(tr, "_gmail_access_token", lambda: None)
-    ok, err = tr.create_gmail_draft("founder@acme.xyz", "Subject", "Body")
+    ok, err, link = tr.create_gmail_draft("founder@acme.xyz", "Subject", "Body")
     assert ok is False
     assert err is not None
+    assert link is None
 
 
 def test_create_gmail_draft_returns_true_on_success_with_attachment(monkeypatch, tmp_path):
@@ -1292,15 +1293,16 @@ def test_create_gmail_draft_returns_true_on_success_with_attachment(monkeypatch,
         def __exit__(self, *a):
             return False
         def read(self):
-            return b'{"id": "draft1"}'
+            return json.dumps({"id": "draft1", "message": {"id": "msg123", "threadId": "thread1"}}).encode("utf-8")
 
     monkeypatch.setattr(tr, "urlopen", lambda req, timeout=30: FakeResponse())
     pdf_path = tmp_path / "resume.pdf"
     pdf_path.write_bytes(b"%PDF-1.4 fake")
 
-    ok, err = tr.create_gmail_draft("founder@acme.xyz", "Subject", "Body text", str(pdf_path))
+    ok, err, link = tr.create_gmail_draft("founder@acme.xyz", "Subject", "Body text", str(pdf_path))
     assert ok is True
     assert err is None
+    assert link == "https://mail.google.com/mail/u/0/#all/msg123"
 
 
 def test_create_gmail_draft_returns_false_on_api_error(monkeypatch):
@@ -1310,9 +1312,10 @@ def test_create_gmail_draft_returns_false_on_api_error(monkeypatch):
         raise OSError("500 server error")
 
     monkeypatch.setattr(tr, "urlopen", raise_error)
-    ok, err = tr.create_gmail_draft("founder@acme.xyz", "Subject", "Body text")
+    ok, err, link = tr.create_gmail_draft("founder@acme.xyz", "Subject", "Body text")
     assert ok is False
     assert "500" in err
+    assert link is None
 
 
 def test_run_outreach_step_skips_when_sector_is_none(monkeypatch):
@@ -1335,7 +1338,7 @@ def test_run_outreach_step_retries_after_failed_status(monkeypatch):
     monkeypatch.setattr(tr, "get_outreach_status", lambda jid: "failed")
     monkeypatch.setattr(tr, "apollo_lookup", lambda name: {"employee_count": 10, "founder_name": "Jane", "founder_email": "jane@acme.xyz"})
     monkeypatch.setattr(tr, "draft_outreach_email", lambda *a, **k: {"subject": "Hi", "body": "Body"})
-    monkeypatch.setattr(tr, "create_gmail_draft", lambda *a, **k: (True, None))
+    monkeypatch.setattr(tr, "create_gmail_draft", lambda *a, **k: (True, None, "https://mail.google.com/mail/u/0/#all/msg123"))
     monkeypatch.setattr(tr, "update_outreach_fields", lambda *a, **k: None)
     monkeypatch.setattr(tr, "send_telegram_message", lambda text: (True, None))
     result = tr.run_outreach_step({"company_name": "Acme", "title": "SWE"}, "1", "fintech", "jd", "resume", "pdf")
@@ -1421,7 +1424,7 @@ def test_run_outreach_step_bypasses_gate_with_founder_email_override(monkeypatch
     monkeypatch.setattr(tr, "get_outreach_status", lambda jid: (_ for _ in ()).throw(AssertionError("should not be called")))
     monkeypatch.setattr(tr, "apollo_lookup", lambda name: (_ for _ in ()).throw(AssertionError("should not be called")))
     monkeypatch.setattr(tr, "draft_outreach_email", lambda *a, **k: {"subject": "Hi", "body": "Body"})
-    monkeypatch.setattr(tr, "create_gmail_draft", lambda *a, **k: (True, None))
+    monkeypatch.setattr(tr, "create_gmail_draft", lambda *a, **k: (True, None, "https://mail.google.com/mail/u/0/#all/msg123"))
     monkeypatch.setattr(tr, "update_outreach_fields", lambda *a, **k: None)
     monkeypatch.setattr(tr, "send_telegram_message", lambda text: (True, None))
     result = tr.run_outreach_step(
@@ -1435,7 +1438,7 @@ def test_run_outreach_step_sends_telegram_notification_on_success(monkeypatch):
     monkeypatch.setattr(tr, "get_outreach_status", lambda jid: "")
     monkeypatch.setattr(tr, "apollo_lookup", lambda name: {"employee_count": 5, "founder_name": "Jane", "founder_email": "jane@acme.xyz"})
     monkeypatch.setattr(tr, "draft_outreach_email", lambda *a, **k: {"subject": "Hi", "body": "Body"})
-    monkeypatch.setattr(tr, "create_gmail_draft", lambda *a, **k: (True, None))
+    monkeypatch.setattr(tr, "create_gmail_draft", lambda *a, **k: (True, None, "https://mail.google.com/mail/u/0/#all/msg123"))
     monkeypatch.setattr(tr, "update_outreach_fields", lambda *a, **k: None)
     notified = []
     monkeypatch.setattr(tr, "send_telegram_message", lambda text: notified.append(text) or (True, None))
@@ -1443,3 +1446,17 @@ def test_run_outreach_step_sends_telegram_notification_on_success(monkeypatch):
     assert len(notified) == 1
     assert "Jane" in notified[0]
     assert "Acme" in notified[0]
+    assert "https://mail.google.com/mail/u/0/#all/msg123" in notified[0]
+
+
+def test_run_outreach_step_omits_link_when_gmail_draft_response_unparseable(monkeypatch):
+    monkeypatch.setattr(tr, "get_outreach_status", lambda jid: "")
+    monkeypatch.setattr(tr, "apollo_lookup", lambda name: {"employee_count": 5, "founder_name": "Jane", "founder_email": "jane@acme.xyz"})
+    monkeypatch.setattr(tr, "draft_outreach_email", lambda *a, **k: {"subject": "Hi", "body": "Body"})
+    monkeypatch.setattr(tr, "create_gmail_draft", lambda *a, **k: (True, None, None))
+    monkeypatch.setattr(tr, "update_outreach_fields", lambda *a, **k: None)
+    notified = []
+    monkeypatch.setattr(tr, "send_telegram_message", lambda text: notified.append(text) or (True, None))
+    tr.run_outreach_step({"company_name": "Acme", "title": "SWE"}, "1", "fintech", "jd", "resume", "pdf")
+    assert len(notified) == 1
+    assert "mail.google.com" not in notified[0]
