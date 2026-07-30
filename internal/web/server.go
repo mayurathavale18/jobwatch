@@ -41,6 +41,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/jobs", s.handleAPIJobs)
 	mux.HandleFunc("POST /api/jobs/manual", s.handleAPIJobsManual)
 	mux.HandleFunc("PATCH /api/jobs/{id}", s.handleAPIPatchJob)
+	mux.HandleFunc("POST /api/jobs/{id}/outreach", s.handleAPIJobsOutreach)
 	mux.HandleFunc("GET /api/cron", s.handleAPICron)
 	mux.HandleFunc("POST /api/cron/{name}/run", s.handleAPICronRun)
 	mux.Handle("/", s.spaHandler())
