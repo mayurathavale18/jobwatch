@@ -1199,7 +1199,7 @@ git commit -m "Add one-time Gmail OAuth setup script and env-var docs"
 - Consumes: `get_outreach_status`/`update_outreach_fields` (Task 5), `apollo_lookup` (Task 4), `draft_outreach_email` (Task 6), `create_gmail_draft` (Task 7), `fetch_jd_text_for_job` (Task 3).
 - Produces: `run_outreach_step(job, jid, sector, jd_text, resume_text, pdf_path, founder_email_override=None) -> str` (one of `"skipped_sector"|"skipped_size"|"skipped_no_founder"|"drafted"|"failed"`). Consumed by Task 10's `outreach-one.sh`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add to `scripts/test_tailor_resume.py`:
 
@@ -1290,12 +1290,12 @@ def test_run_outreach_step_sends_telegram_notification_on_success(monkeypatch):
     assert "Acme" in notified[0]
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python3 -m pytest scripts/test_tailor_resume.py -k run_outreach_step -v`
 Expected: FAIL — `AttributeError: module 'tailor_resume' has no attribute 'run_outreach_step'`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 Add `send_telegram_message` right after `send_telegram` (line ~1091):
 
@@ -1432,12 +1432,12 @@ Add the CLI dispatch at the bottom of the file, in the `if __name__ == "__main__
             sys.exit(1)
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `python3 -m pytest scripts/test_tailor_resume.py -v`
 Expected: PASS — all new tests pass, and every pre-existing `process_job`/`main` test still passes (the outreach call is wrapped in `try/except`, so it can never change `process_job`'s existing "sent"/"failed"/"skipped_non_eng" return contract).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd /home/dev-mayur/jobwatch/.claude/worktrees/reply-instructions
