@@ -256,8 +256,9 @@ func (s *Server) handleAPICronRun(w http.ResponseWriter, r *http.Request) {
 }
 
 type apiManualJobRequest struct {
-	URL    string `json:"url"`
-	JDText string `json:"jdText"`
+	URL                 string `json:"url"`
+	JDText              string `json:"jdText"`
+	OutreachInstruction string `json:"outreachInstruction"`
 }
 
 type apiManualJobResponse struct {
@@ -293,8 +294,9 @@ func (s *Server) handleAPIJobsManual(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.JDText = strings.TrimSpace(req.JDText)
+	req.OutreachInstruction = strings.TrimSpace(req.OutreachInstruction)
 
-	id, existed, company, title, err := jobsubmit.InsertManualJob(ctx, s.store, req.URL, req.JDText, s.pages)
+	id, existed, company, title, err := jobsubmit.InsertManualJob(ctx, s.store, req.URL, req.JDText, req.OutreachInstruction, s.pages)
 	if err != nil {
 		httpError(w, "inserting manual job", err)
 		return

@@ -408,7 +408,7 @@ func manualJobURL(text string) (string, bool) {
 // jobsubmit package and confirms with the #J{id} tag reply-based status
 // control depends on.
 func (s *Syncer) addManualJob(ctx context.Context, msg *notify.Message, rawURL string) error {
-	id, existed, company, title, err := jobsubmit.InsertManualJob(ctx, s.Store, rawURL, "", s.Pages)
+	id, existed, company, title, err := jobsubmit.InsertManualJob(ctx, s.Store, rawURL, "", "", s.Pages)
 	if err != nil {
 		return err
 	}

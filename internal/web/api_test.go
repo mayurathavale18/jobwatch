@@ -378,6 +378,33 @@ func TestHandleAPIJobsManualPersistsJDText(t *testing.T) {
 	}
 }
 
+func TestHandleAPIJobsManualPersistsOutreachInstruction(t *testing.T) {
+	srv, st := newTestServer(t)
+	srv.logsDir = t.TempDir() // see comment in TestHandleAPIJobsManualInsertsAndTriggersOneOff
+
+	body := strings.NewReader(`{"url":"https://valorem.keka.com/careers/jobdetails/124256","outreachInstruction":"  Founder's email is jane@acme.com  "}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/jobs/manual", body)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202, body: %s", w.Code, w.Body.String())
+	}
+
+	var resp apiManualJobResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v\nbody: %s", err, w.Body.String())
+	}
+
+	got, err := st.GetJob(req.Context(), resp.ID)
+	if err != nil {
+		t.Fatalf("GetJob: %v", err)
+	}
+	if got.ManualOutreachInstruction != "Founder's email is jane@acme.com" {
+		t.Errorf("ManualOutreachInstruction = %q, want trimmed instruction text", got.ManualOutreachInstruction)
+	}
+}
+
 func TestHandleAPIJobsOutreachTriggersScript(t *testing.T) {
 	srv, st := newTestServer(t)
 	srv.logsDir = t.TempDir() // see comment in TestHandleAPIJobsManualInsertsAndTriggersOneOff

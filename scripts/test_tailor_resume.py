@@ -1194,6 +1194,20 @@ def test_update_outreach_fields_leaves_drafted_at_empty_for_non_drafted_status(m
     assert row[0] == ""
 
 
+def test_extract_email_from_instruction_finds_email():
+    text = "Founder's email is jane@acme.com, mention our Kubernetes work."
+    assert tr.extract_email_from_instruction(text) == "jane@acme.com"
+
+
+def test_extract_email_from_instruction_returns_none_when_absent():
+    assert tr.extract_email_from_instruction("Find HR's email and mention our Kubernetes work.") is None
+
+
+def test_extract_email_from_instruction_returns_none_for_empty():
+    assert tr.extract_email_from_instruction("") is None
+    assert tr.extract_email_from_instruction(None) is None
+
+
 def test_draft_outreach_email_returns_subject_and_body(monkeypatch):
     monkeypatch.setattr(
         tr, "call_opencode",
@@ -1202,6 +1216,21 @@ def test_draft_outreach_email_returns_subject_and_body(monkeypatch):
     )
     result = tr.draft_outreach_email("JD text", "resume text", "Jane", "Backend Engineer", "Acme")
     assert result == {"subject": "Backend Engineer role", "body": "Hi Jane, ..."}
+
+
+def test_draft_outreach_email_includes_instruction_context_in_prompt(monkeypatch):
+    captured = {}
+
+    def fake_call_opencode(system_prompt, user_content, model=tr.OUTREACH_EMAIL_MODEL, timeout=20):
+        captured["user_content"] = user_content
+        return '{"subject": "Hi", "body": "Body"}'
+
+    monkeypatch.setattr(tr, "call_opencode", fake_call_opencode)
+    tr.draft_outreach_email(
+        "JD text", "resume text", "Jane", "Backend Engineer", "Acme",
+        extra_instruction="Keep it very short and mention our Kubernetes migration.",
+    )
+    assert "Keep it very short and mention our Kubernetes migration." in captured["user_content"]
 
 
 def test_draft_outreach_email_returns_none_on_llm_failure(monkeypatch):
@@ -1342,6 +1371,50 @@ def test_run_outreach_step_fails_when_draft_generation_fails(monkeypatch):
     result = tr.run_outreach_step({"company_name": "Acme", "title": "SWE"}, "1", "fintech", "jd", "resume", "pdf")
     assert result == "failed"
     assert calls == [("1", "failed", "Jane", "jane@acme.xyz")]
+
+
+def test_run_outreach_step_bypasses_gate_with_email_extracted_from_manual_instruction(monkeypatch):
+    monkeypatch.setattr(tr, "get_outreach_status", lambda jid: (_ for _ in ()).throw(AssertionError("should not be called")))
+    monkeypatch.setattr(tr, "apollo_lookup", lambda name: (_ for _ in ()).throw(AssertionError("should not be called")))
+    captured = {}
+
+    def fake_draft(*a, **k):
+        captured.update(k)
+        return {"subject": "Hi", "body": "Body"}
+
+    monkeypatch.setattr(tr, "draft_outreach_email", fake_draft)
+    monkeypatch.setattr(tr, "create_gmail_draft", lambda *a, **k: (True, None))
+    monkeypatch.setattr(tr, "update_outreach_fields", lambda *a, **k: None)
+    monkeypatch.setattr(tr, "send_telegram_message", lambda text: (True, None))
+    job = {
+        "company_name": "Acme", "title": "SWE",
+        "manual_outreach_instruction": "Founder's email is jane@acme.com, mention our Kubernetes work.",
+    }
+    result = tr.run_outreach_step(job, "1", None, "jd", "resume", "pdf")
+    assert result == "drafted"
+    assert captured.get("extra_instruction") == "Founder's email is jane@acme.com, mention our Kubernetes work."
+
+
+def test_run_outreach_step_feeds_instruction_context_even_without_extractable_email(monkeypatch):
+    monkeypatch.setattr(tr, "get_outreach_status", lambda jid: "")
+    monkeypatch.setattr(tr, "apollo_lookup", lambda name: {"employee_count": 5, "founder_name": "Jane", "founder_email": "jane@acme.xyz"})
+    captured = {}
+
+    def fake_draft(*a, **k):
+        captured.update(k)
+        return {"subject": "Hi", "body": "Body"}
+
+    monkeypatch.setattr(tr, "draft_outreach_email", fake_draft)
+    monkeypatch.setattr(tr, "create_gmail_draft", lambda *a, **k: (True, None))
+    monkeypatch.setattr(tr, "update_outreach_fields", lambda *a, **k: None)
+    monkeypatch.setattr(tr, "send_telegram_message", lambda text: (True, None))
+    job = {
+        "company_name": "Acme", "title": "SWE",
+        "manual_outreach_instruction": "Find HR's email and mention our Kubernetes work.",
+    }
+    result = tr.run_outreach_step(job, "1", "fintech", "jd", "resume", "pdf")
+    assert result == "drafted"
+    assert captured.get("extra_instruction") == "Find HR's email and mention our Kubernetes work."
 
 
 def test_run_outreach_step_bypasses_gate_with_founder_email_override(monkeypatch):

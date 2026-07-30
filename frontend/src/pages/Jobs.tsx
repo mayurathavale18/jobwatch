@@ -23,6 +23,7 @@ export default function Jobs() {
   const [data, setData] = useState<JobsResponse | null>(null)
   const [manualUrl, setManualUrl] = useState('')
   const [manualJdText, setManualJdText] = useState('')
+  const [manualOutreachInstruction, setManualOutreachInstruction] = useState('')
   const [manualStatus, setManualStatus] = useState<string | null>(null)
   const [manualSubmitting, setManualSubmitting] = useState(false)
   const [outreachOverride, setOutreachOverride] = useState<Record<number, string>>({})
@@ -49,7 +50,7 @@ export default function Jobs() {
     setManualSubmitting(true)
     setManualStatus(null)
     try {
-      const result = await submitManualJob(url, manualJdText.trim())
+      const result = await submitManualJob(url, manualJdText.trim(), manualOutreachInstruction.trim())
       setManualStatus(
         result.alreadyExisted
           ? `Already added — #J${result.id} (${result.company})`
@@ -57,6 +58,7 @@ export default function Jobs() {
       )
       setManualUrl('')
       setManualJdText('')
+      setManualOutreachInstruction('')
     } catch (err) {
       setManualStatus(`Failed to add: ${err instanceof Error ? err.message : String(err)}`)
     } finally {
@@ -149,6 +151,17 @@ export default function Jobs() {
             onChange={(e) => setManualJdText(e.target.value)}
           />
           <input type="file" accept=".txt,.md" onChange={handleJdFileChange} />
+        </div>
+        <div className="add-job-outreach-instruction">
+          <textarea
+            placeholder="Outreach instructions (optional) — e.g. an email address to draft to, or notes on tone/what to mention"
+            value={manualOutreachInstruction}
+            onChange={(e) => setManualOutreachInstruction(e.target.value)}
+          />
+          <span className="hint">
+            An email address in this text is used automatically. Free-text asks like "find HR's
+            email" can't be fulfilled yet — Apollo's free tier can't look up people.
+          </span>
         </div>
       </form>
 
