@@ -1458,7 +1458,7 @@ git commit -m "Wire outreach step into process_job and add --outreach CLI entry 
 
 No automated test — this is a thin bash wrapper mirroring `scripts/tailor-one.sh` exactly; its correctness is exercised by Task 11/12's Go tests (which invoke a *fake* script) and by the manual end-to-end check in Task 14.
 
-- [ ] **Step 1: Create the script**
+- [x] **Step 1: Create the script**
 
 Create `scripts/outreach-one.sh`:
 
@@ -1502,12 +1502,12 @@ fi
 exec python3 "$SCRIPT_DIR/tailor_resume.py" "${ARGS[@]}"
 ```
 
-- [ ] **Step 2: Verify it's syntactically valid and executable**
+- [x] **Step 2: Verify it's syntactically valid and executable**
 
 Run: `chmod +x scripts/outreach-one.sh && bash -n scripts/outreach-one.sh && echo OK`
 Expected: `OK` (bash `-n` checks syntax without running it).
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 cd /home/dev-mayur/jobwatch/.claude/worktrees/reply-instructions
