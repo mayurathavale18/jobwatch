@@ -1159,7 +1159,7 @@ if __name__ == "__main__":
     main()
 ```
 
-- [ ] **Step 2: Manual verification (run once you've done the Google Cloud Console steps 1-3 above)** — blocked as of 2026-07-30: the key added to `creds.yml` was a plain API key (`AIzaSy...`), not an OAuth Client ID. Gmail draft creation needs OAuth (user consent), which a bare API key cannot provide — need the "Desktop app" OAuth Client ID + Secret instead.
+- [x] **Step 2: Manual verification (run once you've done the Google Cloud Console steps 1-3 above)** — done 2026-07-30. Real client_id/secret obtained; OAuth client type turned out to be **"Web application," not "Desktop app"** (despite the app name being "jobwatch") — Web app clients require every redirect URI whitelisted explicitly in Cloud Console (Desktop app clients auto-accept any `http://localhost:<port>`), so the flow first failed with `redirect_uri_mismatch` until `http://localhost:8765` was added under "Authorized redirect URIs". After that, consent flow succeeded, `GMAIL_REFRESH_TOKEN` minted, and `create_gmail_draft` was live-tested end-to-end (a real "safe to delete" draft was created in Mayur's actual Gmail) — confirmed working, not just token-minted. Credentials added to the laptop's `.env`; still need adding to the EC2 box's `.env` at deploy time (see CLAUDE.md gotcha).
 
 ```bash
 cd /home/dev-mayur/jobwatch
