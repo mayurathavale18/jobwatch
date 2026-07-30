@@ -353,6 +353,13 @@ def draft_outreach_email(jd_text, resume_text, founder_name, title, company):
     any LLM failure or malformed/empty response -- callers must skip
     (never fall back to a generic template; a non-personalized "draft"
     isn't worth creating, see spec's Error handling section).
+
+    Uses a 45s timeout (not call_opencode's 20s default): live-tested
+    against a real JD+resume-sized prompt on OUTREACH_EMAIL_MODEL and it
+    took ~35s. llm_judge sends similarly-sized prompts at the 20s default
+    and gets away with it only because it has a rule-based fallback on
+    timeout; this function has no fallback by design, so it needs real
+    headroom instead.
     """
     raw = call_opencode(
         system_prompt=(
@@ -372,7 +379,7 @@ def draft_outreach_email(jd_text, resume_text, founder_name, title, company):
             f"JOB DESCRIPTION:\n{jd_text}\n\nRESUME:\n{resume_text}"
         ),
         model=OUTREACH_EMAIL_MODEL,
-        timeout=20,
+        timeout=45,
     )
     if not raw:
         return None

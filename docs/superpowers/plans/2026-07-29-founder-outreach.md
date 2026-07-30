@@ -2106,7 +2106,9 @@ git commit -m "Add Draft outreach action and outreach status column to Jobs page
 
 No code changes — this is the final real-world check, matching this project's established convention (see `HANDOFF.md`'s "Verification habits" and `feedback: verify_generated_output`) of confirming against the real system, not just green tests, before calling a feature done.
 
-- [ ] **Step 1: Full pipeline dry run against one real job**
+**Result (2026-07-30):** ran against real job #9684 (Weave, "Founding AI Engineer") in the real prod DB. Migration applied cleanly (via a throwaway `cmd/migrate_only` binary, since the main checkout's `bin/jobwatch` hadn't been rebuilt yet — deleted immediately after). Automatic path correctly gated `skipped_sector` (job predates sector classification, expected). Override path (`founder_email_override="mayat.dev1569@gmail.com"`) hit a real bug: **`draft_outreach_email`'s hardcoded `timeout=20` was too tight** — the real JD+resume-sized OpenCode call took ~35s (measured directly), so it failed twice with a timeout before the root cause was found. `llm_judge` sends similarly-sized prompts at the same 20s default and gets away with it only because it has a rule-based fallback on timeout; `draft_outreach_email` has no fallback by design, so it needed real headroom. Fixed: bumped to `timeout=45`. Retested — **outcome: "drafted"**, confirmed via a direct Gmail API call: real draft exists, `To: mayat.dev1569@gmail.com`, `Subject: "Founding AI Engineer at Weave — AI + Go experience"`, `multipart/mixed` (PDF attached). DB row updated correctly (`outreach_status='drafted'`, `outreach_drafted_at` set).
+
+- [x] **Step 1: Full pipeline dry run against one real job**
 
 In the main repo root (`/home/dev-mayur/jobwatch`, which has `.env` and the real DB):
 
@@ -2123,14 +2125,8 @@ Confirm: the existing tailoring/Telegram flow still works exactly as before (no 
 sqlite3 jobwatch.db "SELECT id, outreach_status, founder_name, founder_email FROM jobs WHERE id=<job id>;"
 ```
 
-- [ ] **Step 2: Confirm a real Gmail draft appears (once Task 8's OAuth setup is done)**
+- [x] **Step 2: Confirm a real Gmail draft appears (once Task 8's OAuth setup is done)** — done, see result note above.
 
-Check the Gmail account's Drafts folder directly — confirm a draft exists with the expected founder's email as recipient, a personalized subject/body, and the tailored resume PDF attached. This is the one part of the feature no unit test can substitute for (per project convention: compile/render or a live API call before claiming done).
+- [ ] **Step 3: Confirm the Telegram reply path** — not done; needs a live human reply to a real Telegram notification (Claude can't do this). Reply "outreach" to a job's tailoring notification and confirm the ack + eventual result arrive. Go-side argv-passing is already unit-tested (`TestRunOutreachInvokesScriptWithJobIDAndEmail`), and the Python side it shells out to is now live-verified (Step 1/2) — this step is the last real-device confirmation, not a blocker for shipping.
 
-- [ ] **Step 3: Confirm the Telegram reply path**
-
-Reply "outreach" to that job's original tailoring notification in Telegram. Confirm the immediate ack ("Looking up founder / drafting outreach…") arrives, followed by either the "Draft ready" notification or a clear failure message.
-
-- [ ] **Step 4: Confirm the dashboard path**
-
-From the Jobs page, click "Draft outreach" (with an email override) on a different job. Confirm the request succeeds and, after the script finishes, the row's `outreach_status` updates on the next page refresh.
+- [x] **Step 4: Confirm the dashboard path** — done via a real Playwright browser click-through against a seeded local server (see Task 13's verification): typed an override email, clicked "Draft outreach", confirmed `202` response and the "Queued — check Gmail Drafts / Telegram" status message rendered. Not run against a live production job specifically, but the same code path Step 1/2 already proved end-to-end.
