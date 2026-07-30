@@ -346,13 +346,35 @@ def apollo_lookup(company_name):
     return {"employee_count": employee_count, "founder_name": founder_name, "founder_email": founder_email}
 
 
-def draft_outreach_email(jd_text, resume_text, founder_name, title, company):
+EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
+
+
+def extract_email_from_instruction(text):
+    """Regex-extract a plain email address out of user-supplied outreach
+    instruction text (e.g. "Founder's email is jane@acme.com"). Returns
+    the matched address, or None if no email-shaped substring is present
+    (e.g. "find HR's email" -- a request, not an address). Deterministic,
+    no LLM call -- cheap enough to run on every manual submission.
+    """
+    if not text:
+        return None
+    m = EMAIL_RE.search(text)
+    return m.group(0) if m else None
+
+
+def draft_outreach_email(jd_text, resume_text, founder_name, title, company, extra_instruction=""):
     """Generate a short, personalized cold-outreach email from the
     candidate to a startup founder, referencing concrete JD/resume
     overlap. Returns {"subject": str, "body": str} on success, None on
     any LLM failure or malformed/empty response -- callers must skip
     (never fall back to a generic template; a non-personalized "draft"
     isn't worth creating, see spec's Error handling section).
+
+    extra_instruction is the raw text of the dashboard's optional
+    "Outreach instructions" field (tone/what-to-mention notes from the
+    person submitting the job) -- fed into the prompt as extra context
+    whenever present, regardless of whether it also yielded an
+    extractable email via extract_email_from_instruction.
 
     Uses a 45s timeout (not call_opencode's 20s default): live-tested
     against a real JD+resume-sized prompt on OUTREACH_EMAIL_MODEL and it
@@ -361,6 +383,13 @@ def draft_outreach_email(jd_text, resume_text, founder_name, title, company):
     timeout; this function has no fallback by design, so it needs real
     headroom instead.
     """
+    user_content = (
+        f"FOUNDER NAME: {founder_name or 'there'}\n\n"
+        f"JOB DESCRIPTION:\n{jd_text}\n\nRESUME:\n{resume_text}"
+    )
+    if extra_instruction:
+        user_content += f"\n\nADDITIONAL CONTEXT FROM THE CANDIDATE:\n{extra_instruction}"
+
     raw = call_opencode(
         system_prompt=(
             "You write short, genuine-sounding cold outreach emails from "
@@ -369,15 +398,13 @@ def draft_outreach_email(jd_text, resume_text, founder_name, title, company):
             f"{company}. Reference one or two concrete points from the "
             "job description and the candidate's resume that make them a "
             "good fit -- do not invent any experience not present in the "
-            "resume text. Keep it under 150 words, no generic flattery, "
-            "no 'I hope this email finds you well'. Respond with ONLY "
-            "valid JSON, no markdown fences, no commentary, in this "
-            'exact shape: {"subject": "...", "body": "..."}'
+            "resume text. If additional context from the candidate is "
+            "given, honor its tone/emphasis requests. Keep it under 150 "
+            "words, no generic flattery, no 'I hope this email finds you "
+            "well'. Respond with ONLY valid JSON, no markdown fences, no "
+            'commentary, in this exact shape: {"subject": "...", "body": "..."}'
         ),
-        user_content=(
-            f"FOUNDER NAME: {founder_name or 'there'}\n\n"
-            f"JOB DESCRIPTION:\n{jd_text}\n\nRESUME:\n{resume_text}"
-        ),
+        user_content=user_content,
         model=OUTREACH_EMAIL_MODEL,
         timeout=45,
     )
@@ -1368,7 +1395,18 @@ def run_outreach_step(job, jid, sector, jd_text, resume_text, pdf_path, founder_
     "drafted"/"failed". Never raises -- any failure downstream of the
     gate (LLM draft generation, Gmail API) resolves to "failed", which is
     retryable on the next automatic pass (see Task 5/spec's retry fix).
+
+    An email address embedded in job["manual_outreach_instruction"] (the
+    dashboard's "Outreach instructions" field) is extracted and treated
+    exactly like founder_email_override -- the human already supplied a
+    real address, so it bypasses the status/sector/size gate the same
+    way. The raw instruction text is always fed into draft_outreach_email
+    as extra context, whether or not it contained an email.
     """
+    instruction = (job.get("manual_outreach_instruction") or "").strip()
+    if not founder_email_override and instruction:
+        founder_email_override = extract_email_from_instruction(instruction)
+
     if founder_email_override:
         founder_name = ""
         founder_email = founder_email_override
@@ -1392,7 +1430,10 @@ def run_outreach_step(job, jid, sector, jd_text, resume_text, pdf_path, founder_
         founder_name = apollo["founder_name"]
         founder_email = apollo["founder_email"]
 
-    draft = draft_outreach_email(jd_text, resume_text, founder_name, job.get("title", ""), job.get("company_name", ""))
+    draft = draft_outreach_email(
+        jd_text, resume_text, founder_name, job.get("title", ""), job.get("company_name", ""),
+        extra_instruction=instruction,
+    )
     if not draft:
         update_outreach_fields(jid, "failed", founder_name, founder_email)
         return "failed"

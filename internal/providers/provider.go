@@ -31,6 +31,13 @@ type Job struct {
 	// from the dashboard's manual-submit form. Empty for every polled
 	// provider -- only jobsubmit.InsertManualJob ever sets it.
 	JDText string
+	// OutreachInstruction is user-supplied free text from the dashboard's
+	// manual-submit form (e.g. "founder's email is jane@acme.com") that
+	// steers the founder-outreach step: an extracted email becomes an
+	// automatic founder_email_override, and the raw text is fed into the
+	// outreach email LLM prompt as extra context either way. Empty for
+	// every polled provider and for the Telegram bare-URL path.
+	OutreachInstruction string
 }
 
 // Provider fetches the current set of open postings for one company.

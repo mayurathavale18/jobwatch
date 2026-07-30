@@ -110,6 +110,34 @@ func TestInsertJobPersistsJDText(t *testing.T) {
 	}
 }
 
+func TestInsertJobPersistsOutreachInstruction(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+
+	job := sampleJob()
+	job.OutreachInstruction = "Founder's email is jane@acme.com, mention our Kubernetes work."
+
+	tx, err := s.BeginTx(ctx)
+	if err != nil {
+		t.Fatalf("BeginTx: %v", err)
+	}
+	id, err := s.InsertJob(ctx, tx, job, StatusNew)
+	if err != nil {
+		t.Fatalf("InsertJob: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+
+	got, err := s.GetJob(ctx, id)
+	if err != nil {
+		t.Fatalf("GetJob: %v", err)
+	}
+	if got.ManualOutreachInstruction != job.OutreachInstruction {
+		t.Errorf("ManualOutreachInstruction = %q, want %q", got.ManualOutreachInstruction, job.OutreachInstruction)
+	}
+}
+
 func TestMigrateAddsManualJDTextColumnToExistingDB(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.db")

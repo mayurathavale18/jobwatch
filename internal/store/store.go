@@ -89,6 +89,7 @@ CREATE TABLE IF NOT EXISTS jobs (
 	notes TEXT NOT NULL DEFAULT '',
 	raw JSON,
 	manual_jd_text TEXT NOT NULL DEFAULT '',
+	manual_outreach_instruction TEXT NOT NULL DEFAULT '',
 	outreach_status TEXT NOT NULL DEFAULT '',
 	founder_name TEXT NOT NULL DEFAULT '',
 	founder_email TEXT NOT NULL DEFAULT '',
@@ -121,6 +122,7 @@ CREATE TABLE IF NOT EXISTS kv (
 	// Add the column for existing DBs (created before manual_jd_text existed)
 	// Try to add the column; ignore "duplicate column" errors from pre-existing DBs that already have it
 	_, _ = s.db.Exec(`ALTER TABLE jobs ADD COLUMN manual_jd_text TEXT NOT NULL DEFAULT ''`)
+	_, _ = s.db.Exec(`ALTER TABLE jobs ADD COLUMN manual_outreach_instruction TEXT NOT NULL DEFAULT ''`)
 	_, _ = s.db.Exec(`ALTER TABLE jobs ADD COLUMN outreach_status TEXT NOT NULL DEFAULT ''`)
 	_, _ = s.db.Exec(`ALTER TABLE jobs ADD COLUMN founder_name TEXT NOT NULL DEFAULT ''`)
 	_, _ = s.db.Exec(`ALTER TABLE jobs ADD COLUMN founder_email TEXT NOT NULL DEFAULT ''`)
@@ -205,11 +207,11 @@ func (s *Store) InsertJob(ctx context.Context, tx *sql.Tx, job providers.Job, st
 	}
 
 	res, err := tx.ExecContext(ctx, `
-		INSERT INTO jobs (provider, company_slug, company_name, external_id, title, location, url, posted_at, first_seen_at, status, raw, manual_jd_text)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		INSERT INTO jobs (provider, company_slug, company_name, external_id, title, location, url, posted_at, first_seen_at, status, raw, manual_jd_text, manual_outreach_instruction)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		job.Provider, job.CompanySlug, job.CompanyName, job.ExternalID,
 		job.Title, job.Location, job.URL, postedAt,
-		job.FirstSeenAt.UTC().Format(time.RFC3339), status, string(raw), job.JDText,
+		job.FirstSeenAt.UTC().Format(time.RFC3339), status, string(raw), job.JDText, job.OutreachInstruction,
 	)
 	if err != nil {
 		return 0, err
@@ -262,23 +264,24 @@ func updateNotesExecer(ctx context.Context, e execer, id int64, notes string) er
 
 // JobRow is a job as read back from the database for display.
 type JobRow struct {
-	ID                int64
-	Provider          string
-	CompanySlug       string
-	CompanyName       string
-	ExternalID        string
-	Title             string
-	Location          string
-	URL               string
-	PostedAt          sql.NullString
-	FirstSeenAt       string
-	Status            string
-	Notes             string
-	ManualJDText      string
-	OutreachStatus    string
-	FounderName       string
-	FounderEmail      string
-	OutreachDraftedAt string
+	ID                        int64
+	Provider                  string
+	CompanySlug               string
+	CompanyName               string
+	ExternalID                string
+	Title                     string
+	Location                  string
+	URL                       string
+	PostedAt                  sql.NullString
+	FirstSeenAt               string
+	Status                    string
+	Notes                     string
+	ManualJDText              string
+	ManualOutreachInstruction string
+	OutreachStatus            string
+	FounderName               string
+	FounderEmail              string
+	OutreachDraftedAt         string
 }
 
 // JobFilter narrows ListJobs results.
@@ -327,7 +330,7 @@ func filterWhere(f JobFilter) (string, []any) {
 
 func (s *Store) ListJobs(ctx context.Context, f JobFilter) ([]JobRow, error) {
 	where, args := filterWhere(f)
-	query := `SELECT id, provider, company_slug, company_name, external_id, title, location, url, posted_at, first_seen_at, status, notes, manual_jd_text, outreach_status, founder_name, founder_email, outreach_drafted_at FROM jobs` + where
+	query := `SELECT id, provider, company_slug, company_name, external_id, title, location, url, posted_at, first_seen_at, status, notes, manual_jd_text, manual_outreach_instruction, outreach_status, founder_name, founder_email, outreach_drafted_at FROM jobs` + where
 	query += ` ORDER BY first_seen_at DESC, id DESC`
 	if f.Limit > 0 {
 		query += ` LIMIT ? OFFSET ?`
@@ -344,7 +347,7 @@ func (s *Store) ListJobs(ctx context.Context, f JobFilter) ([]JobRow, error) {
 	for rows.Next() {
 		var j JobRow
 		if err := rows.Scan(&j.ID, &j.Provider, &j.CompanySlug, &j.CompanyName, &j.ExternalID,
-			&j.Title, &j.Location, &j.URL, &j.PostedAt, &j.FirstSeenAt, &j.Status, &j.Notes, &j.ManualJDText,
+			&j.Title, &j.Location, &j.URL, &j.PostedAt, &j.FirstSeenAt, &j.Status, &j.Notes, &j.ManualJDText, &j.ManualOutreachInstruction,
 			&j.OutreachStatus, &j.FounderName, &j.FounderEmail, &j.OutreachDraftedAt); err != nil {
 			return nil, err
 		}
@@ -382,10 +385,10 @@ func (s *Store) GetJobTx(ctx context.Context, tx *sql.Tx, id int64) (JobRow, err
 func getJobQuerier(ctx context.Context, q querier, id int64) (JobRow, error) {
 	var j JobRow
 	err := q.QueryRowContext(ctx,
-		`SELECT id, provider, company_slug, company_name, external_id, title, location, url, posted_at, first_seen_at, status, notes, manual_jd_text, outreach_status, founder_name, founder_email, outreach_drafted_at FROM jobs WHERE id = ?`,
+		`SELECT id, provider, company_slug, company_name, external_id, title, location, url, posted_at, first_seen_at, status, notes, manual_jd_text, manual_outreach_instruction, outreach_status, founder_name, founder_email, outreach_drafted_at FROM jobs WHERE id = ?`,
 		id,
 	).Scan(&j.ID, &j.Provider, &j.CompanySlug, &j.CompanyName, &j.ExternalID,
-		&j.Title, &j.Location, &j.URL, &j.PostedAt, &j.FirstSeenAt, &j.Status, &j.Notes, &j.ManualJDText,
+		&j.Title, &j.Location, &j.URL, &j.PostedAt, &j.FirstSeenAt, &j.Status, &j.Notes, &j.ManualJDText, &j.ManualOutreachInstruction,
 		&j.OutreachStatus, &j.FounderName, &j.FounderEmail, &j.OutreachDraftedAt)
 	return j, err
 }

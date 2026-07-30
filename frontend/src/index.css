@@ -142,6 +142,26 @@ h1 {
   resize: vertical;
 }
 
+.add-job-outreach-instruction {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.add-job-outreach-instruction textarea {
+  flex: 1;
+  min-width: 240px;
+  min-height: 44px;
+  resize: vertical;
+}
+
+.add-job-outreach-instruction .hint {
+  flex-basis: 100%;
+  font-size: 0.85em;
+  color: var(--muted);
+}
+
 input,
 select,
 textarea {

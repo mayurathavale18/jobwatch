@@ -125,7 +125,12 @@ func manualSlug(rawURL string) string {
 // routinely fails for the exact sources this manual-submit path exists
 // for (Workday, Naukri, etc). Empty for the Telegram bare-URL-forward
 // path, which has no way to supply it.
-func InsertManualJob(ctx context.Context, st *store.Store, rawURL string, jdText string, pages PageFetcher) (id int64, alreadyExisted bool, company string, title string, err error) {
+// outreachInstruction is optional user-supplied free text (dashboard's
+// "Outreach instructions" field) that steers the founder-outreach step --
+// stored verbatim for tailor_resume.py to regex-extract an email from
+// and/or feed into the outreach LLM prompt as context. Empty for the
+// Telegram bare-URL-forward path, same as jdText.
+func InsertManualJob(ctx context.Context, st *store.Store, rawURL string, jdText string, outreachInstruction string, pages PageFetcher) (id int64, alreadyExisted bool, company string, title string, err error) {
 	company = companyFromURL(rawURL)
 	slug := manualSlug(rawURL)
 
@@ -156,15 +161,16 @@ func InsertManualJob(ctx context.Context, st *store.Store, rawURL string, jdText
 	}
 
 	job := providers.Job{
-		Provider:    "manual",
-		CompanySlug: slug,
-		CompanyName: company,
-		ExternalID:  rawURL,
-		Title:       fetchedTitle,
-		URL:         rawURL,
-		FirstSeenAt: time.Now().UTC(),
-		Raw:         json.RawMessage(`{}`),
-		JDText:      jdText,
+		Provider:            "manual",
+		CompanySlug:         slug,
+		CompanyName:         company,
+		ExternalID:          rawURL,
+		Title:               fetchedTitle,
+		URL:                 rawURL,
+		FirstSeenAt:         time.Now().UTC(),
+		Raw:                 json.RawMessage(`{}`),
+		JDText:              jdText,
+		OutreachInstruction: outreachInstruction,
 	}
 
 	newID, err := st.InsertJob(ctx, tx, job, store.StatusNew)
