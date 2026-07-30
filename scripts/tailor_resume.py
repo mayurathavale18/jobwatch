@@ -5,6 +5,7 @@ Generates tailored LaTeX resumes for unprocessed 'new' jobs, compiles to PDF,
 verifies one page, updates tracker, and sends Telegram notifications.
 """
 
+import base64
 import json
 import os
 import re
@@ -15,8 +16,12 @@ import sys
 import time
 import html
 from datetime import datetime
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.mime.application import MIMEApplication
 from urllib.request import urlopen, Request
 from urllib.error import HTTPError, URLError
+from urllib.parse import urlencode
 from pathlib import Path
 
 # -----------------------------------------------------------------------------
@@ -72,6 +77,16 @@ APOLLO_API_KEY = os.environ.get("APOLLO_API_KEY", "")
 APOLLO_BASE_URL = "https://api.apollo.io/v1"
 FOUNDER_TITLES = ["founder", "co-founder", "cofounder", "chief executive officer", "ceo"]
 MAX_OUTREACH_EMPLOYEES = 20
+
+# Gmail API (gmail.compose scope only -- can create/edit drafts, cannot
+# read or send mail). OAuth2 refresh token, minted once via the local
+# scripts/gmail_auth_setup.py flow (see docs/superpowers/specs/
+# 2026-07-27-founder-outreach-design.md's "Gmail OAuth setup" section).
+GMAIL_CLIENT_ID = os.environ.get("GMAIL_CLIENT_ID", "")
+GMAIL_CLIENT_SECRET = os.environ.get("GMAIL_CLIENT_SECRET", "")
+GMAIL_REFRESH_TOKEN = os.environ.get("GMAIL_REFRESH_TOKEN", "")
+GMAIL_TOKEN_URL = "https://oauth2.googleapis.com/token"
+GMAIL_DRAFTS_URL = "https://gmail.googleapis.com/gmail/v1/users/me/drafts"
 
 # -----------------------------------------------------------------------------
 # Logging helpers
@@ -372,6 +387,73 @@ def draft_outreach_email(jd_text, resume_text, founder_name, title, company):
     if not subject or not body:
         return None
     return {"subject": subject, "body": body}
+
+
+def _gmail_access_token():
+    """Exchange the long-lived refresh token for a short-lived access
+    token. Returns the token string, or None on any failure (missing
+    config, revoked token, network error) -- callers must treat this as
+    a miss, never crash.
+    """
+    if not (GMAIL_CLIENT_ID and GMAIL_CLIENT_SECRET and GMAIL_REFRESH_TOKEN):
+        return None
+    body = urlencode({
+        "client_id": GMAIL_CLIENT_ID,
+        "client_secret": GMAIL_CLIENT_SECRET,
+        "refresh_token": GMAIL_REFRESH_TOKEN,
+        "grant_type": "refresh_token",
+    }).encode("utf-8")
+    try:
+        req = Request(
+            GMAIL_TOKEN_URL, data=body, method="POST",
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        with urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        return data.get("access_token")
+    except Exception as e:
+        log(f"WARN: Gmail token refresh failed: {e}")
+        return None
+
+
+def create_gmail_draft(to_email, subject, body_text, attachment_path=None):
+    """Create a Gmail draft (never sends) via the Gmail API. Returns
+    (True, None) on success, (False, error_message) on any failure --
+    callers must treat failure as retryable (outreach_status='failed'),
+    never crash the caller's own flow.
+    """
+    access_token = _gmail_access_token()
+    if not access_token:
+        return False, "Gmail not configured or token refresh failed"
+
+    msg = MIMEMultipart()
+    msg["to"] = to_email
+    msg["subject"] = subject
+    msg.attach(MIMEText(body_text, "plain"))
+
+    if attachment_path and Path(attachment_path).exists():
+        with open(attachment_path, "rb") as f:
+            part = MIMEApplication(f.read(), _subtype="pdf")
+        part.add_header("Content-Disposition", "attachment", filename=Path(attachment_path).name)
+        msg.attach(part)
+
+    raw = base64.urlsafe_b64encode(msg.as_bytes()).decode("utf-8")
+
+    try:
+        req = Request(
+            GMAIL_DRAFTS_URL,
+            data=json.dumps({"message": {"raw": raw}}).encode("utf-8"),
+            method="POST",
+            headers={
+                "Authorization": f"Bearer {access_token}",
+                "Content-Type": "application/json",
+            },
+        )
+        with urlopen(req, timeout=30) as resp:
+            resp.read()
+        return True, None
+    except Exception as e:
+        return False, str(e)
 
 
 RULE_BASED_REJECT_THRESHOLD = 0.4

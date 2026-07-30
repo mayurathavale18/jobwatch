@@ -1221,3 +1221,66 @@ def test_draft_outreach_email_returns_none_on_empty_subject_or_body(monkeypatch)
             '{"subject": "", "body": "Hi Jane, ..."}',
     )
     assert tr.draft_outreach_email("JD text", "resume text", "Jane", "Backend Engineer", "Acme") is None
+
+
+def test_gmail_access_token_returns_none_without_config(monkeypatch):
+    monkeypatch.setattr(tr, "GMAIL_CLIENT_ID", "")
+    monkeypatch.setattr(tr, "GMAIL_CLIENT_SECRET", "secret")
+    monkeypatch.setattr(tr, "GMAIL_REFRESH_TOKEN", "refresh")
+    assert tr._gmail_access_token() is None
+
+
+def test_gmail_access_token_returns_token_on_success(monkeypatch):
+    monkeypatch.setattr(tr, "GMAIL_CLIENT_ID", "id")
+    monkeypatch.setattr(tr, "GMAIL_CLIENT_SECRET", "secret")
+    monkeypatch.setattr(tr, "GMAIL_REFRESH_TOKEN", "refresh")
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            return False
+        def read(self):
+            return json.dumps({"access_token": "tok123"}).encode("utf-8")
+
+    monkeypatch.setattr(tr, "urlopen", lambda req, timeout=15: FakeResponse())
+    assert tr._gmail_access_token() == "tok123"
+
+
+def test_create_gmail_draft_returns_false_without_token(monkeypatch):
+    monkeypatch.setattr(tr, "_gmail_access_token", lambda: None)
+    ok, err = tr.create_gmail_draft("founder@acme.xyz", "Subject", "Body")
+    assert ok is False
+    assert err is not None
+
+
+def test_create_gmail_draft_returns_true_on_success_with_attachment(monkeypatch, tmp_path):
+    monkeypatch.setattr(tr, "_gmail_access_token", lambda: "tok123")
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            return False
+        def read(self):
+            return b'{"id": "draft1"}'
+
+    monkeypatch.setattr(tr, "urlopen", lambda req, timeout=30: FakeResponse())
+    pdf_path = tmp_path / "resume.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4 fake")
+
+    ok, err = tr.create_gmail_draft("founder@acme.xyz", "Subject", "Body text", str(pdf_path))
+    assert ok is True
+    assert err is None
+
+
+def test_create_gmail_draft_returns_false_on_api_error(monkeypatch):
+    monkeypatch.setattr(tr, "_gmail_access_token", lambda: "tok123")
+
+    def raise_error(*args, **kwargs):
+        raise OSError("500 server error")
+
+    monkeypatch.setattr(tr, "urlopen", raise_error)
+    ok, err = tr.create_gmail_draft("founder@acme.xyz", "Subject", "Body text")
+    assert ok is False
+    assert "500" in err
