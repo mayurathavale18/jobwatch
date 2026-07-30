@@ -1772,7 +1772,7 @@ git commit -m "Add outreach Telegram reply command (outreach / outreach: email)"
 - Consumes: `scripts/outreach-one.sh <job_id> [founder_email]` (Task 10), `store.JobRow`'s new fields (Task 1).
 - Produces: `POST /api/jobs/{id}/outreach` — `202 {"id": <id>}` on success, `400` on invalid id, `404` if job doesn't exist. Consumed by Task 13's frontend.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add to `internal/web/api_test.go`:
 
@@ -1834,12 +1834,12 @@ func TestHandleAPIJobsIncludesOutreachFields(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `go test ./internal/web/... -run TestHandleAPIJobsOutreach -v`
 Expected: FAIL — `404 page not found` (route doesn't exist yet).
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 Add fields to `apiJob` in `internal/web/api.go` (line ~17-27) and `toAPIJob`:
 
@@ -1962,12 +1962,12 @@ Register the route in `internal/web/server.go` (line ~44, after `PATCH /api/jobs
 	mux.HandleFunc("POST /api/jobs/{id}/outreach", s.handleAPIJobsOutreach)
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `go test ./internal/web/... -v && go build ./... && gofmt -l .`
 Expected: PASS, build succeeds, `gofmt -l .` prints nothing.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd /home/dev-mayur/jobwatch/.claude/worktrees/reply-instructions
