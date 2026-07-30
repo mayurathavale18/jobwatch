@@ -1987,7 +1987,7 @@ git commit -m "Add POST /api/jobs/{id}/outreach dashboard trigger endpoint"
 
 No new automated test — this codebase has no frontend test suite (confirmed: no `*.test.tsx`/`*.spec.tsx` files, verification is `tsc`/`oxlint`/`vite build` + manual click-through, same as the 2026-07-27 jobs-filter-upgrade task). Steps 2-3 below are that same verification.
 
-- [ ] **Step 1: Implement**
+- [x] **Step 1: Implement**
 
 In `frontend/src/api.ts`, add fields to `Job` (line ~1-11):
 
@@ -2077,7 +2077,7 @@ Add a new `<th>Outreach</th>` to the table header (line ~211, after `<th>Notes</
 
 Update the header row's `colSpan={6}` (empty-state row, line ~232) to `colSpan={7}` to match the new column count.
 
-- [ ] **Step 2: Type-check and build**
+- [x] **Step 2: Type-check and build**
 
 ```bash
 cd /home/dev-mayur/jobwatch/.claude/worktrees/reply-instructions/frontend
@@ -2088,11 +2088,11 @@ npm run build
 
 Expected: all three clean/succeed, no type errors.
 
-- [ ] **Step 3: Manual click-through** (once the Go backend from Task 12 is running locally)
+- [x] **Step 3: Manual click-through** (once the Go backend from Task 12 is running locally)
 
 Start the dashboard locally, open the Jobs page, confirm: the new "Outreach" column renders for every row, typing an email into the override box and clicking "Draft outreach" fires the request (check Network tab for `202`), and a row with `outreachStatus: "drafted"` (you can set this manually via `sqlite3 jobwatch.db "UPDATE jobs SET outreach_status='drafted', founder_name='Test Founder' WHERE id=1"` for a quick visual check) renders the "Drafted — ..." state instead of the button.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 cd /home/dev-mayur/jobwatch/.claude/worktrees/reply-instructions
