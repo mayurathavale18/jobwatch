@@ -761,3 +761,110 @@ func TestAddManualJobTitleFetchFailsStillInserts(t *testing.T) {
 		t.Errorf("Title = %q, want a placeholder mentioning the fetch failure", rows[0].Title)
 	}
 }
+
+func outreachUpdate(text string) []notify.Update {
+	return []notify.Update{
+		{
+			UpdateID: 700,
+			Message: &notify.Message{
+				MessageID: 1200,
+				Chat:      notify.Chat{ID: 555},
+				Text:      text,
+				ReplyToMessage: &notify.Message{
+					MessageID: 1199,
+					Chat:      notify.Chat{ID: 555},
+					Text:      "#J1",
+				},
+			},
+		},
+	}
+}
+
+func TestParseOutreachBareCommand(t *testing.T) {
+	email, ok := parseOutreach("outreach")
+	if !ok || email != "" {
+		t.Errorf("parseOutreach(\"outreach\") = (%q, %v), want (\"\", true)", email, ok)
+	}
+}
+
+func TestParseOutreachWithEmailOverride(t *testing.T) {
+	email, ok := parseOutreach("outreach: jane@acme.xyz")
+	if !ok || email != "jane@acme.xyz" {
+		t.Errorf("parseOutreach(\"outreach: jane@acme.xyz\") = (%q, %v), want (\"jane@acme.xyz\", true)", email, ok)
+	}
+}
+
+func TestParseOutreachNoMatch(t *testing.T) {
+	if _, ok := parseOutreach("applied"); ok {
+		t.Errorf("parseOutreach(\"applied\") matched, want no match")
+	}
+}
+
+func TestRunOutreachNotConfigured(t *testing.T) {
+	ctx := context.Background()
+	st := newTestStoreWithJob(t)
+	fake := &fakeTelegram{all: outreachUpdate("outreach")}
+	syncer := &Syncer{Store: st, TG: fake, ChatID: 555} // OutreachScript left empty
+
+	if _, err := syncer.Run(ctx); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(fake.replies) != 1 || fake.replies[0].Text != "Outreach isn't configured on this install." {
+		t.Errorf("expected not-configured reply, got %+v", fake.replies)
+	}
+}
+
+func TestRunOutreachInvokesScriptWithJobIDAndEmail(t *testing.T) {
+	dir := t.TempDir()
+	scriptPath := filepath.Join(dir, "outreach.sh")
+	argsFile := filepath.Join(dir, "args.txt")
+	script := "#!/bin/sh\necho \"$@\" > " + argsFile + "\nexit 0\n"
+	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("writing fake script: %v", err)
+	}
+
+	ctx := context.Background()
+	st := newTestStoreWithJob(t)
+	fake := &fakeTelegram{all: outreachUpdate("outreach: jane@acme.xyz")}
+	syncer := &Syncer{Store: st, TG: fake, ChatID: 555, OutreachScript: scriptPath}
+
+	if _, err := syncer.Run(ctx); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if len(fake.replies) != 1 || fake.replies[0].Text != "Looking up founder / drafting outreach…" {
+		t.Errorf("expected immediate ack reply, got %+v", fake.replies)
+	}
+
+	gotArgs, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatalf("script was not invoked: %v", err)
+	}
+	if strings.TrimSpace(string(gotArgs)) != "1 jane@acme.xyz" {
+		t.Errorf("script args = %q, want \"1 jane@acme.xyz\"", strings.TrimSpace(string(gotArgs)))
+	}
+}
+
+func TestRunOutreachReportsScriptFailure(t *testing.T) {
+	dir := t.TempDir()
+	scriptPath := filepath.Join(dir, "outreach.sh")
+	script := "#!/bin/sh\necho 'OUTREACH_FAILED: no founder found' >&2\nexit 1\n"
+	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("writing fake script: %v", err)
+	}
+
+	ctx := context.Background()
+	st := newTestStoreWithJob(t)
+	fake := &fakeTelegram{all: outreachUpdate("outreach")}
+	syncer := &Syncer{Store: st, TG: fake, ChatID: 555, OutreachScript: scriptPath}
+
+	if _, err := syncer.Run(ctx); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(fake.replies) != 2 {
+		t.Fatalf("replies = %+v, want ack + failure message", fake.replies)
+	}
+	if !strings.Contains(fake.replies[1].Text, "Outreach failed for #J1") {
+		t.Errorf("replies[1] = %q, want it to mention the failure", fake.replies[1].Text)
+	}
+}
