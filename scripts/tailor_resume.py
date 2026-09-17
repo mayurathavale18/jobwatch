@@ -2021,7 +2021,16 @@ def main():
     conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
     c = conn.cursor()
-    c.execute("SELECT * FROM jobs WHERE status='new' ORDER BY id")
+    # Budget is 8/cycle, 20/day, so queue order is the preference order:
+    # remote/global first, then India onsite/hybrid, newest first within each.
+    c.execute("""
+        SELECT * FROM jobs WHERE status='new'
+        ORDER BY
+          CASE WHEN lower(location) LIKE '%remote%' OR lower(location) LIKE '%worldwide%'
+                 OR lower(location) LIKE '%anywhere%' OR lower(location) LIKE '%global%' THEN 0
+               ELSE 1 END,
+          id DESC
+    """)
     rows = c.fetchall()
     conn.close()
 

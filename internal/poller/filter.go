@@ -27,14 +27,26 @@ func Passes(job providers.Job, f config.Filters) bool {
 		return false
 	}
 
-	if len(f.LocationsInclude) > 0 {
-		location := strings.ToLower(job.Location)
-		if !containsAny(location, f.LocationsInclude) {
-			return false
-		}
+	if len(f.LocationsInclude) > 0 && !locationPasses(strings.ToLower(job.Location), f) {
+		return false
 	}
 
 	return true
+}
+
+// locationPasses splits a multi-location string ("Remote, Canada; Remote,
+// United States") into segments and passes if any single segment matches
+// an include term without matching an exclude term -- so "Remote, Global"
+// passes but a remote role locked to a foreign country doesn't.
+// ponytail: a segment naming both India and a foreign region ("Remote - US
+// or India") is rejected; split on " or " too if that ever costs a real job.
+func locationPasses(location string, f config.Filters) bool {
+	for _, seg := range strings.FieldsFunc(location, func(r rune) bool { return r == ';' || r == '|' }) {
+		if containsAny(seg, f.LocationsInclude) && !matchesAny(seg, f.LocationsExclude) {
+			return true
+		}
+	}
+	return false
 }
 
 // matchesAny reports whether haystack contains any needle as a whole word
