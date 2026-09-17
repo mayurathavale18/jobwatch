@@ -37,9 +37,6 @@ companies:
   - name: "Chime"
     provider: greenhouse
     slug: chime
-  - name: "Marqeta"
-    provider: greenhouse
-    slug: marqeta
   - name: "Robinhood"
     provider: greenhouse
     slug: robinhood
@@ -163,8 +160,10 @@ companies:
 
 filters:
   include_keywords: ["backend", "software engineer", "sde", "swe", "platform", "golang", "python", "cloud", "infrastructure", "fullstack", "full stack", "full-stack", "data engineer", "distributed systems", "forward deployed", "fde", "ai engineer", "ai platform", "llm", "machine learning engineer", "ml engineer", "mlops", "rag", "agent", "sre", "site reliability", "systems engineer", "devops", "solutions engineer", "microservices", "reliability engineer"]
-  exclude_keywords: ["staff", "principal", "director", "manager", "intern", "10+ years", "lead"]
-  locations_include: ["india", "hyderabad", "bengaluru", "bangalore", "remote", "worldwide", "anywhere"]
+  exclude_keywords: ["staff", "principal", "director", "manager", "intern", "10+ years", "lead", "analyst"]
+  locations_include: ["india", "hyderabad", "bengaluru", "bangalore", "pune", "mumbai", "delhi", "gurgaon", "gurugram", "noida", "chennai", "remote", "worldwide", "anywhere", "global"]
+  # No visa for anywhere outside India: a "remote" role locked to one of these is not workable.
+  locations_exclude: ["us", "usa", "united states", "america", "americas", "amer", "north america", "latam", "canada", "uk", "united kingdom", "emea", "europe", "eu", "germany", "france", "poland", "ireland", "netherlands", "spain", "portugal", "israel", "australia", "brazil", "mexico", "japan", "singapore", "london", "new york", "san francisco", "berlin", "toronto"]
 
 telegram:
   bot_token_env: "JOBWATCH_TG_TOKEN"

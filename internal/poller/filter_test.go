@@ -44,6 +44,35 @@ func TestPasses(t *testing.T) {
 	}
 }
 
+func TestPassesRejectsCountryLockedRemote(t *testing.T) {
+	filters := config.Filters{
+		IncludeKeywords:  []string{"backend"},
+		LocationsInclude: []string{"india", "bangalore", "remote", "global", "worldwide"},
+		LocationsExclude: []string{"us", "united states", "canada", "united kingdom", "poland", "emea"},
+	}
+	tests := []struct {
+		loc  string
+		want bool
+	}{
+		{"Remote, Global", true},
+		{"Remote, Bangalore", true},
+		{"Worldwide", true},
+		{"Bangalore, India", true},
+		{"US - Remote", false},
+		{"United States (Remote)", false},
+		{"Remote, Canada; Remote, United States", false},
+		{"Remote, Poland", false},
+		{"Remote, EMEA; Bangalore, India", true},
+		{"Remote, Australia", true}, // not in this test's exclude list
+	}
+	for _, tt := range tests {
+		job := providers.Job{Title: "Backend Engineer", Location: tt.loc}
+		if got := Passes(job, filters); got != tt.want {
+			t.Errorf("location %q: got %v, want %v", tt.loc, got, tt.want)
+		}
+	}
+}
+
 func TestPassesEmptyLocationFilterAllowsAll(t *testing.T) {
 	filters := config.Filters{
 		IncludeKeywords:  []string{"backend"},

@@ -35,7 +35,7 @@ jobs:
         run: |
           rsync -azR -e "ssh -i ~/.ssh/deploy_key -p 2222" \
             internal cmd scripts config.yaml go.mod go.sum \
-            resume/master.tex resume/facts.md \
+            resume/master.tex resume/facts.md resume/preferences.md \
             root@169.58.234.131:/tmp/jobwatch_deploy/
 
       - name: Install into PVC, rebuild binary, restart dashboard

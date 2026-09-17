@@ -31,6 +31,10 @@ type Filters struct {
 	IncludeKeywords  []string `yaml:"include_keywords"`
 	ExcludeKeywords  []string `yaml:"exclude_keywords"`
 	LocationsInclude []string `yaml:"locations_include"`
+	// LocationsExclude rejects a location segment that names a region the
+	// candidate can't legally work from ("Remote, United States"), even
+	// though it also matches an include term like "remote".
+	LocationsExclude []string `yaml:"locations_exclude"`
 }
 
 type Telegram struct {

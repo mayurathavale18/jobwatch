@@ -16,6 +16,7 @@ import (
 	"jobwatch/internal/config"
 	"jobwatch/internal/notify"
 	"jobwatch/internal/poller"
+	"jobwatch/internal/providers"
 	"jobwatch/internal/store"
 	"jobwatch/internal/tgsync"
 	"jobwatch/internal/web"
@@ -44,6 +45,8 @@ func main() {
 		err = runTestNotify(args)
 	case "tg-sync":
 		err = runTgSync(args)
+	case "refilter":
+		err = runRefilter(args)
 	case "-h", "--help", "help":
 		usage()
 		return
@@ -67,7 +70,8 @@ Usage:
   jobwatch backfill    [-config config.yaml]   poll and store everything as seen, without notifying
   jobwatch serve       [-config config.yaml]   run the dashboard web server
   jobwatch test-notify [-config config.yaml]   send a test Telegram message and exit
-  jobwatch tg-sync     [-config config.yaml]   drain Telegram replies and apply status/notes changes, then exit`)
+  jobwatch tg-sync     [-config config.yaml]   drain Telegram replies and apply status/notes changes, then exit
+  jobwatch refilter    [-config config.yaml]   re-apply current filters to status=new jobs, marking failures ignored`)
 }
 
 func loadConfigFlag(fs *flag.FlagSet, args []string) (*config.Config, error) {
@@ -144,6 +148,40 @@ func runServe(args []string) error {
 	defer cancel()
 
 	return web.Serve(ctx, cfg.Dashboard.Addr, st)
+}
+
+// runRefilter re-applies the current config filters to every job still in
+// status=new. Filters are only evaluated at insert time, so without this a
+// filter fix leaves stale matches queued for (budget-limited) tailoring.
+func runRefilter(args []string) error {
+	fs := flag.NewFlagSet("refilter", flag.ExitOnError)
+	cfg, err := loadConfigFlag(fs, args)
+	if err != nil {
+		return err
+	}
+	st, err := store.Open(cfg.DBPath)
+	if err != nil {
+		return fmt.Errorf("opening store: %w", err)
+	}
+	defer st.Close()
+
+	ctx := context.Background()
+	jobs, err := st.ListJobs(ctx, store.JobFilter{Statuses: []string{"new"}})
+	if err != nil {
+		return err
+	}
+	ignored := 0
+	for _, j := range jobs {
+		if poller.Passes(providers.Job{Title: j.Title, Location: j.Location}, cfg.Filters) {
+			continue
+		}
+		if err := st.UpdateStatus(ctx, j.ID, "ignored"); err != nil {
+			return err
+		}
+		ignored++
+	}
+	slog.Info("refilter complete", "checked", len(jobs), "ignored", ignored)
+	return nil
 }
 
 func runTestNotify(args []string) error {
