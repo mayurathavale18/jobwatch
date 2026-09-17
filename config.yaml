@@ -85,6 +85,81 @@ companies:
   - name: "Airwallex"
     provider: ashby
     slug: airwallex
+  - name: "Remotive"
+    provider: remotive
+    slug: remotive
+  - name: "Anthropic"
+    provider: greenhouse
+    slug: anthropic
+  - name: "Vercel"
+    provider: greenhouse
+    slug: vercel
+  - name: "Figma"
+    provider: greenhouse
+    slug: figma
+  - name: "GitLab"
+    provider: greenhouse
+    slug: gitlab
+  - name: "Datadog"
+    provider: greenhouse
+    slug: datadog
+  - name: "MongoDB"
+    provider: greenhouse
+    slug: mongodb
+  - name: "Grafana Labs"
+    provider: greenhouse
+    slug: grafanalabs
+  - name: "Cockroach Labs"
+    provider: greenhouse
+    slug: cockroachlabs
+  - name: "Airbnb"
+    provider: greenhouse
+    slug: airbnb
+  - name: "Reddit"
+    provider: greenhouse
+    slug: reddit
+  - name: "DoorDash"
+    provider: greenhouse
+    slug: doordashusa
+  - name: "Scale AI"
+    provider: greenhouse
+    slug: scaleai
+  - name: "Groww"
+    provider: greenhouse
+    slug: groww
+  - name: "OpenAI"
+    provider: ashby
+    slug: openai
+  - name: "Supabase"
+    provider: ashby
+    slug: supabase
+  - name: "Linear"
+    provider: ashby
+    slug: linear
+  - name: "ElevenLabs"
+    provider: ashby
+    slug: elevenlabs
+  - name: "Sierra"
+    provider: ashby
+    slug: sierra
+  - name: "ClickHouse"
+    provider: ashby
+    slug: clickhouse
+  - name: "Cohere"
+    provider: ashby
+    slug: cohere
+  - name: "Perplexity"
+    provider: ashby
+    slug: perplexity
+  - name: "Temporal"
+    provider: ashby
+    slug: temporal
+  - name: "Spotify"
+    provider: lever
+    slug: spotify
+  - name: "Palantir"
+    provider: lever
+    slug: palantir
 
 filters:
   include_keywords: ["backend", "software engineer", "sde", "swe", "platform", "golang", "python", "cloud", "infrastructure", "fullstack", "full stack", "full-stack", "data engineer", "distributed systems", "forward deployed", "fde", "ai engineer", "ai platform", "llm", "machine learning engineer", "ml engineer", "mlops", "rag", "agent", "sre", "site reliability", "systems engineer", "devops", "solutions engineer", "microservices", "reliability engineer"]

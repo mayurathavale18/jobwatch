@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"encoding/json"
 	"os"
 	"testing"
 	"time"
@@ -315,5 +316,46 @@ func TestParseAshbySkipsUnlisted(t *testing.T) {
 	}
 	if jobs[0].ExternalID != "1" {
 		t.Errorf("expected job 1 to survive, got %q", jobs[0].ExternalID)
+	}
+}
+
+func TestParseRemotive(t *testing.T) {
+	data := readFixture(t, "testdata/remotive/sample.json")
+
+	var body remotiveResponse
+	if err := json.Unmarshal(data, &body); err != nil {
+		t.Fatalf("unmarshal fixture: %v", err)
+	}
+	jobs, err := parseRemotive(body.Jobs)
+	if err != nil {
+		t.Fatalf("parseRemotive: %v", err)
+	}
+	if len(jobs) != 2 {
+		t.Fatalf("expected 2 jobs, got %d", len(jobs))
+	}
+
+	j := jobs[0]
+	if j.Provider != "remotive" {
+		t.Errorf("Provider = %q, want remotive", j.Provider)
+	}
+	if j.CompanySlug != "acme-corp" || j.CompanyName != "Acme Corp" {
+		t.Errorf("company fields wrong: slug=%q name=%q", j.CompanySlug, j.CompanyName)
+	}
+	if j.ExternalID != "2069746" {
+		t.Errorf("ExternalID = %q, want 2069746", j.ExternalID)
+	}
+	if j.Location != "India" {
+		t.Errorf("Location = %q, want India", j.Location)
+	}
+	if j.PostedAt == nil {
+		t.Fatal("PostedAt nil, want parsed timestamp")
+	}
+
+	// Empty required-location means anywhere on a remote-only board.
+	if jobs[1].Location != "Worldwide" {
+		t.Errorf("empty location = %q, want Worldwide", jobs[1].Location)
+	}
+	if jobs[1].PostedAt != nil {
+		t.Errorf("empty publication_date should give nil PostedAt")
 	}
 }
