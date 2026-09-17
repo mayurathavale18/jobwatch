@@ -118,7 +118,9 @@
 # Personal projects (outside work)
 - **CollateralFi** (Solana, Rust/Anchor, Python, LangGraph, FastAPI, Pyth Oracle) — In progress / planned, not yet built: AI-agent-orchestrated DeFi lending protocol. On-chain Solana program (Anchor/Rust) for collateral deposit, stablecoin borrowing, and liquidation execution; LangGraph-based off-chain risk agent reading price-oracle feeds to compute dynamic loan-to-value ratios and trigger liquidations; on-chain payment settlement (SPL token transfers) for loan disbursement/repayment. Do NOT claim as completed/shipped work until actually built.
 - **PR Manager** (Go, GitHub APIs, GitHub Actions): CLI automating PR workflows — reviewer assignment, merge queuing, status checks, cross-platform binary releases via Actions.
-- **Terminal Portfolio** (Go, BubbleTea, Wish, Lipgloss, AWS EC2): SSH-accessible TUI (ssh portfolio.mayurathavale.com), multi-tab navigation, SQLite visitor analytics, live presence tracking; GitHub Actions hot-deploy via SCP + systemd.
+- **Terminal Portfolio** (Go, BubbleTea, Wish, Lipgloss): SSH-accessible TUI (ssh portfolio.mayurathavale.com), multi-tab navigation, SQLite visitor analytics, live presence tracking. Originally AWS EC2 + GitHub Actions SCP/systemd deploy; since Aug 2026 self-hosted on a personal k3s cluster.
+- **jobwatch** (Go, Python, React, SQLite, k3s): personal AI job-search agent, running in production for Mayur since Jul 2026. Polls 50+ company ATS boards (Greenhouse, Ashby, Lever, Workday) and aggregators (RemoteOK, WWR, Remotive, web3.career); LLM verdict + preference-fit scoring per role; JD-tailored one-page LaTeX resume generation under a facts.md truth-lock; Telegram bot notifications + reply commands; Gmail API draft/send for recruiter and referral outreach; LinkedIn-connection referral matching. Deployed on a self-hosted k3s cluster (Contabo VPS; traefik ingress, cert-manager TLS, CronJobs, PVC storage) with GitHub Actions CD.
+- **Personal k3s cluster** (Contabo VPS): single-node k3s running jobwatch, the terminal portfolio, and Vaultwarden; traefik ingress, cert-manager Let's Encrypt TLS, local-path PVCs, CronJobs.
 - **Technical writing**: Medium articles on system security, cloud infra, networking incl. self-hosted VPN tunneling on AWS.
 
 ---
@@ -141,7 +143,7 @@
 
 **Infra/DevOps**
 - production: AWS (full list above), Terraform, Docker, GitHub Actions, CloudWatch observability, Azure Foundry
-- used: GCP [FILL: what specifically on GCP?], Kubernetes [FILL: honest tier — resume says production workloads, confirm what you actually ran]
+- used: GCP [FILL: what specifically on GCP?], Kubernetes (personal k3s cluster running 3 services with ingress, TLS, CronJobs, PVCs — see Personal projects; not claimed as work production)
 
 **Frontend**
 - production: React 18, Vite, NX, Module Federation, PWA/offline-first, react-joyride, Centrifuge, React Native + Expo
