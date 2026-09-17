@@ -1460,3 +1460,44 @@ def test_run_outreach_step_omits_link_when_gmail_draft_response_unparseable(monk
     tr.run_outreach_step({"company_name": "Acme", "title": "SWE"}, "1", "fintech", "jd", "resume", "pdf")
     assert len(notified) == 1
     assert "mail.google.com" not in notified[0]
+
+
+# ---------------------------------------------------------------------------
+# llm_judge preference-fit fields
+# ---------------------------------------------------------------------------
+
+def test_llm_judge_parses_fit_fields(monkeypatch):
+    monkeypatch.setattr(tr, "call_opencode", lambda system_prompt, user_content: (
+        '{"verdict": "screen", "missing_keywords": [], "reason": "solid", '
+        '"sector": "ai", "fit_score": 85, "work_mode": "remote", '
+        '"fit_reason": "fully remote AI role"}'
+    ))
+    j = tr.llm_judge("jd", "resume", "SWE", "Acme")
+    assert j["fit_score"] == 85
+    assert j["work_mode"] == "remote"
+    assert j["fit_reason"] == "fully remote AI role"
+
+
+def test_llm_judge_rejects_out_of_range_fit_fields(monkeypatch):
+    monkeypatch.setattr(tr, "call_opencode", lambda system_prompt, user_content: (
+        '{"verdict": "screen", "missing_keywords": [], "reason": "ok", '
+        '"sector": null, "fit_score": 400, "work_mode": "office", "fit_reason": ""}'
+    ))
+    j = tr.llm_judge("jd", "resume", "SWE", "Acme")
+    assert j["fit_score"] is None
+    assert j["work_mode"] is None
+
+
+def test_llm_judge_prompt_includes_preferences(monkeypatch):
+    captured = {}
+
+    def fake_call(system_prompt, user_content):
+        captured["system"] = system_prompt
+        return None
+
+    monkeypatch.setattr(tr, "call_opencode", fake_call)
+    monkeypatch.setattr(tr, "load_preferences", lambda: "PREFERS REMOTE")
+    j = tr.llm_judge("jd", "resume", "SWE", "Acme")
+    assert "PREFERS REMOTE" in captured["system"]
+    # rule-based fallback still carries the fit keys
+    assert j["fit_score"] is None and "work_mode" in j

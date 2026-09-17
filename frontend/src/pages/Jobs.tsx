@@ -251,6 +251,7 @@ export default function Jobs() {
             <th>Company</th>
             <th>Title</th>
             <th>Location</th>
+            <th>Fit</th>
             <th>Status</th>
             <th>Notes</th>
             <th>Outreach</th>
@@ -259,7 +260,7 @@ export default function Jobs() {
         <tbody>
           {data.jobs.length === 0 ? (
             <tr>
-              <td colSpan={7} className="muted">
+              <td colSpan={8} className="muted">
                 No jobs match the current filters.
               </td>
             </tr>
@@ -274,6 +275,20 @@ export default function Jobs() {
                   </a>
                 </td>
                 <td>{job.location}</td>
+                <td>
+                  {job.fitScore != null ? (
+                    <span
+                      className="fit-badge"
+                      title={job.workMode || undefined}
+                      style={{ color: job.fitScore >= 70 ? 'var(--good, #2e7d32)' : job.fitScore >= 40 ? 'inherit' : 'var(--bad, #c62828)' }}
+                    >
+                      {job.fitScore}
+                      {job.workMode ? ` · ${job.workMode}` : ''}
+                    </span>
+                  ) : (
+                    <span className="muted">—</span>
+                  )}
+                </td>
                 <td>
                   <select
                     className={`status-${job.status}`}

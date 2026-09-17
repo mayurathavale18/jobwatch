@@ -40,6 +40,7 @@ DB_PATH = REPO_ROOT / "jobwatch.db"
 MASTER_TEX_PATH = REPO_ROOT / "resume" / "master.tex"
 FACTS_MD_PATH = REPO_ROOT / "resume" / "facts.md"
 TAILORED_JSON_PATH = REPO_ROOT / "resume" / "tailored.json"
+PREFERENCES_MD_PATH = REPO_ROOT / "resume" / "preferences.md"
 # Intentionally still $HOME-based, unlike the above: this is real output
 # meant to land in whichever environment's own home directory (the user's
 # ~/Documents on a laptop, the service user's home on the server), not a
@@ -502,6 +503,19 @@ def create_gmail_draft(to_email, subject, body_text, attachment_path=None):
 
 RULE_BASED_REJECT_THRESHOLD = 0.4
 VALID_SECTORS = {"crypto", "web3", "defi", "fintech", "ai"}
+VALID_WORK_MODES = {"remote", "hybrid", "onsite"}
+
+
+def load_preferences():
+    """Mayur's job-preference profile (resume/preferences.md), fed verbatim
+    into the llm_judge prompt. Missing file degrades to no personalization
+    rather than an error, so a checkout without the file still judges.
+    """
+    try:
+        return PREFERENCES_MD_PATH.read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+
 
 def llm_judge(jd_text, resume_text, title, company):
     """Judge how a busy recruiter (5-10 seconds per resume, 100+ resumes
@@ -515,6 +529,20 @@ def llm_judge(jd_text, resume_text, title, company):
     via "source" so the Telegram message can show which one produced it.
     Rule-based fallback never classifies sector (no signal for it).
     """
+    preferences = load_preferences()
+    fit_instruction = ""
+    if preferences:
+        fit_instruction = (
+            "Additionally, the candidate has a preference profile (below). "
+            'Score "fit_score" 0-100: how well this specific job matches the '
+            "candidate's preferences (work mode, location/visa constraint, "
+            "likely compensation level, company type) AND their skills. A "
+            "role that violates the hard visa/location constraint or clearly "
+            "pays below their current benchmark scores under 30. Classify "
+            '"work_mode" from the JD as remote, hybrid, onsite, or null if '
+            'the JD does not say. Give "fit_reason": one blunt sentence on '
+            "the dominant factor.\n\nCANDIDATE PREFERENCES:\n" + preferences + "\n\n"
+        )
     raw = call_opencode(
         system_prompt=(
             "You are a hiring manager screening resumes for a "
@@ -525,12 +553,16 @@ def llm_judge(jd_text, resume_text, title, company):
             "Also classify the company's sector based on the job "
             "description and company name: one of crypto, web3, defi, "
             "fintech, ai, or null if none of those clearly apply. "
+            + fit_instruction +
             "Respond with ONLY valid JSON, no markdown fences, no "
             "commentary, in this exact shape: "
             '{"verdict": "screen"|"reject_risk", '
             '"missing_keywords": ["keyword1", "keyword2"], '
             '"reason": "one sentence explaining the verdict", '
-            '"sector": "crypto"|"web3"|"defi"|"fintech"|"ai"|null}'
+            '"sector": "crypto"|"web3"|"defi"|"fintech"|"ai"|null, '
+            '"fit_score": 0-100, '
+            '"work_mode": "remote"|"hybrid"|"onsite"|null, '
+            '"fit_reason": "one sentence"}'
         ),
         user_content=f"JOB DESCRIPTION:\n{jd_text}\n\nRESUME:\n{resume_text}",
     )
@@ -541,14 +573,21 @@ def llm_judge(jd_text, resume_text, title, company):
             if parsed.get("verdict") in ("screen", "reject_risk") and isinstance(parsed.get("missing_keywords"), list):
                 sector = parsed.get("sector")
                 sector = sector if isinstance(sector, str) and sector in VALID_SECTORS else None
+                fit_score = parsed.get("fit_score")
+                fit_score = int(fit_score) if isinstance(fit_score, (int, float)) and 0 <= fit_score <= 100 else None
+                work_mode = parsed.get("work_mode")
+                work_mode = work_mode if isinstance(work_mode, str) and work_mode in VALID_WORK_MODES else None
                 return {
                     "verdict": parsed["verdict"],
                     "missing_keywords": parsed["missing_keywords"],
                     "reason": str(parsed.get("reason", "")),
                     "source": "llm",
                     "sector": sector,
+                    "fit_score": fit_score,
+                    "work_mode": work_mode,
+                    "fit_reason": str(parsed.get("fit_reason", "")),
                 }
-        except (json.JSONDecodeError, AttributeError):
+        except (json.JSONDecodeError, AttributeError, ValueError):
             log("WARN: llm_judge got malformed JSON from OpenCode, falling back to rule-based")
 
     jd_keywords = extract_keywords(jd_text)
@@ -560,6 +599,9 @@ def llm_judge(jd_text, resume_text, title, company):
         "reason": f"Rule-based: {score:.2f} keyword coverage (LLM unavailable).",
         "source": "rule_based",
         "sector": None,
+        "fit_score": None,
+        "work_mode": None,
+        "fit_reason": "",
     }
 
 def extract_gh_job_id(url):
@@ -1327,6 +1369,10 @@ def send_telegram(pdf_path, company, title, url, score, job_id, reply_to_message
         verdict_label = "SCREEN \u2705" if judgment["verdict"] == "screen" else "REJECT-RISK \u26a0\ufe0f"
         source_note = "" if judgment["source"] == "llm" else " (rule-based, LLM unavailable)"
         lines.append(f"Verdict: {verdict_label}{source_note} \u2014 {judgment['reason']}")
+        if judgment.get("fit_score") is not None:
+            mode_note = f", {judgment['work_mode']}" if judgment.get("work_mode") else ""
+            fit_reason = f" \u2014 {judgment['fit_reason']}" if judgment.get("fit_reason") else ""
+            lines.append(f"Fit: {judgment['fit_score']}/100{mode_note}{fit_reason}")
 
     lines.append(f"Coverage: {score}/1.0")
 
@@ -1574,6 +1620,24 @@ def update_outreach_fields(job_id, status, founder_name="", founder_email=""):
         conn.execute(
             "UPDATE jobs SET outreach_status = ?, founder_name = ?, founder_email = ?, outreach_drafted_at = ? WHERE id = ?",
             (status, founder_name, founder_email, drafted_at, int(job_id)),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def update_job_fit(job_id, fit_score, work_mode):
+    """Persist llm_judge's preference-fit result onto the jobs row so the
+    dashboard can show/sort by it. No-op when the LLM didn't produce one
+    (rule-based fallback) -- never overwrites a real score with NULL.
+    """
+    if fit_score is None:
+        return
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        conn.execute(
+            "UPDATE jobs SET fit_score = ?, work_mode = ? WHERE id = ?",
+            (int(fit_score), work_mode or "", int(job_id)),
         )
         conn.commit()
     finally:
@@ -1903,9 +1967,12 @@ def process_job(job, tailored):
         "verdict": judgment["verdict"], "verdict_source": judgment["source"],
         "verdict_reason": judgment["reason"], "missing_keywords": judgment["missing_keywords"],
         "sector": judgment["sector"],
+        "fit_score": judgment.get("fit_score"), "work_mode": judgment.get("work_mode"),
+        "fit_reason": judgment.get("fit_reason", ""),
         "jd_unavailable": jd_unavailable,
     }
     save_tailored(tailored)
+    update_job_fit(jid, judgment.get("fit_score"), judgment.get("work_mode"))
 
     log(f"  Sending Telegram notification...")
     tg_ok, tg_error = send_telegram(pdf_path, company, title, url, score, jid, judgment=judgment,
