@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -214,37 +212,33 @@ func TestHandleAPICronRunRejectsUnknownJob(t *testing.T) {
 	}
 }
 
-func TestHandleAPICronRunExecutesScript(t *testing.T) {
-	srv, _ := newTestServer(t)
-	srv.logsDir = t.TempDir()
+func TestHandleAPICronRunQueuesEvent(t *testing.T) {
+	srv, st := newTestServer(t)
 
-	markerDir := t.TempDir()
-	marker := filepath.Join(markerDir, "ran")
-	script := filepath.Join(markerDir, "fake-job.sh")
-	if err := os.WriteFile(script, []byte("#!/bin/bash\ntouch \""+marker+"\"\n"), 0o755); err != nil {
-		t.Fatalf("writing fake script: %v", err)
-	}
-
-	original := cronJobDefs
-	cronJobDefs = []cronJob{{Name: "fake-job", Script: script}}
-	t.Cleanup(func() { cronJobDefs = original })
-
-	req := httptest.NewRequest(http.MethodPost, "/api/cron/fake-job/run", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/cron/poll/run", nil)
 	w := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(w, req)
 
 	if w.Code != http.StatusAccepted {
 		t.Fatalf("status = %d, want 202, body: %s", w.Code, w.Body.String())
 	}
+	assertOnlyEvent(t, st, store.EventCronRun, `{"name":"poll"}`)
+}
 
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if _, err := os.Stat(marker); err == nil {
-			return
-		}
-		time.Sleep(20 * time.Millisecond)
+// assertOnlyEvent checks exactly one event is queued, with the given kind
+// and payload.
+func assertOnlyEvent(t *testing.T, st *store.Store, kind, payload string) {
+	t.Helper()
+	events, err := st.RecentEvents(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("RecentEvents: %v", err)
 	}
-	t.Fatal("fake-job.sh did not run within 2s")
+	if len(events) != 1 {
+		t.Fatalf("got %d events, want 1: %+v", len(events), events)
+	}
+	if events[0].Kind != kind || events[0].Payload != payload || events[0].Status != store.EventPending {
+		t.Errorf("event = %+v, want pending %s %s", events[0], kind, payload)
+	}
 }
 
 func TestHandleAPICronReturnsAllJobDefs(t *testing.T) {
@@ -272,7 +266,7 @@ func TestHandleAPICronReturnsAllJobDefs(t *testing.T) {
 	}
 }
 
-func TestHandleAPIJobsManualInsertsAndTriggersOneOff(t *testing.T) {
+func TestHandleAPIJobsManualInsertsAndQueuesTailorOne(t *testing.T) {
 	srv, st := newTestServer(t)
 	// Same reason as TestHandleAPICronRunExecutesScript: NewServer's
 	// default logsDir ("logs") is relative to cwd, which is this
@@ -307,6 +301,7 @@ func TestHandleAPIJobsManualInsertsAndTriggersOneOff(t *testing.T) {
 	if len(rows) != 1 || rows[0].Provider != "manual" {
 		t.Fatalf("rows = %+v, want one manual job inserted", rows)
 	}
+	assertOnlyEvent(t, st, store.EventTailorOne, fmt.Sprintf(`{"job_id":%d}`, resp.ID))
 }
 
 func TestHandleAPIJobsManualRejectsMissingURL(t *testing.T) {
@@ -323,7 +318,7 @@ func TestHandleAPIJobsManualRejectsMissingURL(t *testing.T) {
 
 func TestHandleAPIJobsManualDuplicateReturns200(t *testing.T) {
 	srv, _ := newTestServer(t)
-	srv.logsDir = t.TempDir() // see comment in TestHandleAPIJobsManualInsertsAndTriggersOneOff
+	srv.logsDir = t.TempDir() // see comment in TestHandleAPIJobsManualInsertsAndQueuesTailorOne
 	const jobURL = "https://valorem.keka.com/careers/jobdetails/124256"
 
 	post := func() *httptest.ResponseRecorder {
@@ -353,7 +348,7 @@ func TestHandleAPIJobsManualDuplicateReturns200(t *testing.T) {
 
 func TestHandleAPIJobsManualPersistsJDText(t *testing.T) {
 	srv, st := newTestServer(t)
-	srv.logsDir = t.TempDir() // see comment in TestHandleAPIJobsManualInsertsAndTriggersOneOff
+	srv.logsDir = t.TempDir() // see comment in TestHandleAPIJobsManualInsertsAndQueuesTailorOne
 
 	body := strings.NewReader(`{"url":"https://valorem.keka.com/careers/jobdetails/124256","jdText":"  We need Go and Kubernetes experience.  "}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/jobs/manual", body)
@@ -380,7 +375,7 @@ func TestHandleAPIJobsManualPersistsJDText(t *testing.T) {
 
 func TestHandleAPIJobsManualPersistsOutreachInstruction(t *testing.T) {
 	srv, st := newTestServer(t)
-	srv.logsDir = t.TempDir() // see comment in TestHandleAPIJobsManualInsertsAndTriggersOneOff
+	srv.logsDir = t.TempDir() // see comment in TestHandleAPIJobsManualInsertsAndQueuesTailorOne
 
 	body := strings.NewReader(`{"url":"https://valorem.keka.com/careers/jobdetails/124256","outreachInstruction":"  Founder's email is jane@acme.com  "}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/jobs/manual", body)
@@ -405,9 +400,9 @@ func TestHandleAPIJobsManualPersistsOutreachInstruction(t *testing.T) {
 	}
 }
 
-func TestHandleAPIJobsOutreachTriggersScript(t *testing.T) {
+func TestHandleAPIJobsOutreachQueuesEvent(t *testing.T) {
 	srv, st := newTestServer(t)
-	srv.logsDir = t.TempDir() // see comment in TestHandleAPIJobsManualInsertsAndTriggersOneOff
+	srv.logsDir = t.TempDir() // see comment in TestHandleAPIJobsManualInsertsAndQueuesTailorOne
 	id := insertTestJob(t, st)
 
 	body := strings.NewReader(`{"founderEmail":"jane@acme.xyz"}`)
@@ -418,6 +413,7 @@ func TestHandleAPIJobsOutreachTriggersScript(t *testing.T) {
 	if w.Code != http.StatusAccepted {
 		t.Fatalf("status = %d, want 202, body: %s", w.Code, w.Body.String())
 	}
+	assertOnlyEvent(t, st, store.EventOutreach, fmt.Sprintf(`{"founder_email":"jane@acme.xyz","job_id":%d}`, id))
 }
 
 func TestHandleAPIJobsOutreachRejectsInvalidID(t *testing.T) {

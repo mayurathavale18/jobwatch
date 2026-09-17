@@ -1,13 +1,10 @@
 package web
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
-	"log/slog"
 	"net/http"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -227,45 +224,33 @@ func (s *Server) handleAPICron(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.loadCronStatuses())
 }
 
-// handleAPICronRun triggers one cron job's wrapper script immediately,
-// outside its normal schedule (e.g. tg-sync outside its 07:00-24:00 IST
-// window). The script runs detached -- this only waits long enough to
-// confirm it started, since some jobs (tailor-resume, weekly-backup) can
-// take minutes. Progress shows up the same way the cron-scheduled run
-// would: logs/cron.log and the job's own status.json.
+// handleAPICronRun queues one cron job's wrapper script to run now, outside
+// its normal schedule. The event worker (jobwatch worker) runs it; progress
+// shows up the same way the scheduled run would (logs/cron.log, the job's
+// status.json) plus the event's own row in /api/events.
 func (s *Server) handleAPICronRun(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
-	job, ok := findCronJob(name)
-	if !ok {
+	if _, ok := findCronJob(name); !ok {
 		http.Error(w, "unknown cron job", http.StatusNotFound)
 		return
 	}
-
-	logFile, err := os.OpenFile(filepath.Join(s.logsDir, "cron.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	id, err := s.enqueue(r.Context(), store.EventCronRun, map[string]any{"name": name})
 	if err != nil {
-		httpError(w, "opening cron.log", err)
+		httpError(w, "queueing cron run", err)
 		return
 	}
-
-	cmd := exec.Command("bash", job.Script)
-	cmd.Stdout = logFile
-	cmd.Stderr = logFile
-
-	if err := cmd.Start(); err != nil {
-		logFile.Close()
-		httpError(w, "starting cron job", err)
-		return
-	}
-
-	go func() {
-		defer logFile.Close()
-		if err := cmd.Wait(); err != nil {
-			slog.Error("manually triggered cron job exited non-zero", "job", name, "error", err)
-		}
-	}()
-
 	w.WriteHeader(http.StatusAccepted)
-	writeJSON(w, map[string]any{"triggered": true, "name": name})
+	writeJSON(w, map[string]any{"triggered": true, "name": name, "eventId": id})
+}
+
+// enqueue writes an event for the worker process to pick up (within its
+// poll interval, ~2s). Durable: survives a dashboard or worker restart.
+func (s *Server) enqueue(ctx context.Context, kind string, payload any) (int64, error) {
+	b, err := json.Marshal(payload)
+	if err != nil {
+		return 0, err
+	}
+	return s.store.EnqueueEvent(ctx, kind, string(b))
 }
 
 type apiManualJobRequest struct {
@@ -281,18 +266,12 @@ type apiManualJobResponse struct {
 	Title          string `json:"title"`
 }
 
-// tailorOneScript is the wrapper spawned for a single freshly-submitted
-// job, relative to the process's cwd -- same convention as cronJobDefs'
-// Script paths (see cron.go), always run from the repo root.
-const tailorOneScript = "scripts/tailor-one.sh"
-
 // handleAPIJobsManual inserts a job from an arbitrary URL (dashboard's
-// "add job link" input) and spawns a detached one-off tailoring run for
-// it, so the tailored resume + verdict reaches Telegram in roughly
-// 10-30s instead of waiting for the next tailor-resume cron tick. Mirrors
-// handleAPICronRun's detached-exec pattern: the HTTP response doesn't
-// wait for tailoring to finish, since the result arrives via Telegram the
-// same way every other job notification already does.
+// "add job link" input) and queues a one-off tailoring run for it, so the
+// tailored resume + verdict reaches Telegram in roughly 10-30s instead of
+// waiting for the next tailor-resume cron tick. The HTTP response doesn't
+// wait for tailoring; the result arrives via Telegram like every other job
+// notification.
 func (s *Server) handleAPIJobsManual(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
@@ -323,48 +302,23 @@ func (s *Server) handleAPIJobsManual(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	logFile, err := os.OpenFile(filepath.Join(s.logsDir, "cron.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
-		httpError(w, "opening cron.log", err)
+	if _, err := s.enqueue(ctx, store.EventTailorOne, map[string]any{"job_id": id}); err != nil {
+		httpError(w, "queueing tailor-one", err)
 		return
 	}
-
-	cmd := exec.Command("bash", tailorOneScript, strconv.FormatInt(id, 10))
-	cmd.Stdout = logFile
-	cmd.Stderr = logFile
-
-	if err := cmd.Start(); err != nil {
-		logFile.Close()
-		httpError(w, "starting tailor-one", err)
-		return
-	}
-
-	go func() {
-		defer logFile.Close()
-		if err := cmd.Wait(); err != nil {
-			slog.Error("tailor-one exited non-zero", "job_id", id, "error", err)
-		}
-	}()
 
 	w.WriteHeader(http.StatusAccepted)
 	writeJSON(w, resp)
 }
 
-// outreachOneScript is the wrapper spawned for a manual outreach trigger
-// (dashboard button or Telegram "outreach" reply), relative to the
-// process's cwd -- same convention as tailorOneScript.
-const outreachOneScript = "scripts/outreach-one.sh"
-
 type apiOutreachRequest struct {
 	FounderEmail string `json:"founderEmail"`
 }
 
-// handleAPIJobsOutreach triggers a one-off founder-outreach attempt for
-// an existing job from the dashboard. Mirrors handleAPIJobsManual's
-// detached-exec pattern -- the HTTP response doesn't wait for the
-// lookup/draft to finish; the result surfaces via Telegram (see
-// run_outreach_step's own notification) or a later dashboard refresh of
-// outreachStatus.
+// handleAPIJobsOutreach queues a one-off founder-outreach attempt for an
+// existing job from the dashboard. The HTTP response doesn't wait for the
+// lookup/draft; the result surfaces via Telegram (run_outreach_step's own
+// notification) or a later dashboard refresh of outreachStatus.
 func (s *Server) handleAPIJobsOutreach(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
@@ -388,35 +342,38 @@ func (s *Server) handleAPIJobsOutreach(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	logFile, err := os.OpenFile(filepath.Join(s.logsDir, "cron.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
-		httpError(w, "opening cron.log", err)
+	if _, err := s.enqueue(ctx, store.EventOutreach, map[string]any{"job_id": id, "founder_email": req.FounderEmail}); err != nil {
+		httpError(w, "queueing outreach", err)
 		return
 	}
-
-	args := []string{outreachOneScript, strconv.FormatInt(id, 10)}
-	if req.FounderEmail != "" {
-		args = append(args, req.FounderEmail)
-	}
-	cmd := exec.Command("bash", args...)
-	cmd.Stdout = logFile
-	cmd.Stderr = logFile
-
-	if err := cmd.Start(); err != nil {
-		logFile.Close()
-		httpError(w, "starting outreach-one", err)
-		return
-	}
-
-	go func() {
-		defer logFile.Close()
-		if err := cmd.Wait(); err != nil {
-			slog.Error("outreach-one exited non-zero", "job_id", id, "error", err)
-		}
-	}()
 
 	w.WriteHeader(http.StatusAccepted)
 	writeJSON(w, map[string]any{"id": id})
+}
+
+type apiEvent struct {
+	ID        int64  `json:"id"`
+	Kind      string `json:"kind"`
+	Payload   string `json:"payload"`
+	Status    string `json:"status"`
+	Attempts  int    `json:"attempts"`
+	Error     string `json:"error"`
+	CreatedAt string `json:"createdAt"`
+	UpdatedAt string `json:"updatedAt"`
+}
+
+// handleAPIEvents lists the most recent queued/processed events.
+func (s *Server) handleAPIEvents(w http.ResponseWriter, r *http.Request) {
+	events, err := s.store.RecentEvents(r.Context(), 30)
+	if err != nil {
+		httpError(w, "listing events", err)
+		return
+	}
+	out := make([]apiEvent, len(events))
+	for i, e := range events {
+		out[i] = apiEvent{e.ID, e.Kind, e.Payload, e.Status, e.Attempts, e.Error, e.CreatedAt, e.UpdatedAt}
+	}
+	writeJSON(w, out)
 }
 
 func writeJSON(w http.ResponseWriter, v any) {

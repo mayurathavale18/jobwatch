@@ -24,6 +24,12 @@ type Telegram struct {
 	BaseURL string // override for tests, defaults to https://api.telegram.org
 	Token   string
 	ChatID  string
+
+	// LongPollSeconds is getUpdates' server-side wait for new updates. 0 (the
+	// default) returns immediately; the worker's listener sets it so Telegram
+	// holds the request open and answers the moment a message arrives. The
+	// Client's timeout must exceed it.
+	LongPollSeconds int
 }
 
 // New constructs a Telegram notifier. Returns an error if token or chatID
@@ -167,10 +173,9 @@ type getUpdatesResponse struct {
 // GetUpdates fetches updates (messages, replies) delivered to the bot since
 // offset, following the Telegram getUpdates long-polling convention:
 // pass the previous call's max update_id + 1 as offset to acknowledge
-// prior updates. timeout=0 makes this a single non-blocking poll, suited to
-// jobwatch's run-once-and-exit tg-sync command.
+// prior updates. See LongPollSeconds for blocking vs. non-blocking polls.
 func (t *Telegram) GetUpdates(ctx context.Context, offset int64) ([]Update, error) {
-	endpoint := fmt.Sprintf("%s/bot%s/getUpdates?offset=%d&timeout=0", t.BaseURL, t.Token, offset)
+	endpoint := fmt.Sprintf("%s/bot%s/getUpdates?offset=%d&timeout=%d", t.BaseURL, t.Token, offset, t.LongPollSeconds)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {

@@ -868,3 +868,53 @@ func TestRunOutreachReportsScriptFailure(t *testing.T) {
 		t.Errorf("replies[1] = %q, want it to mention the failure", fake.replies[1].Text)
 	}
 }
+
+func TestListenEnqueuesUpdatesWithOffsetThenHandleEventApplies(t *testing.T) {
+	st := newTestStoreWithJob(t)
+	fake := &fakeTelegram{all: loadFixtureUpdates(t)}
+	syncer := &Syncer{Store: st, TG: fake, ChatID: 555}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	woken := make(chan struct{}, 10)
+	done := make(chan error, 1)
+	go func() { done <- syncer.Listen(ctx, func() { woken <- struct{}{} }) }()
+
+	select {
+	case <-woken:
+	case <-time.After(3 * time.Second):
+		t.Fatal("listener never signalled an enqueue")
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatalf("Listen: %v", err)
+	}
+
+	// Listening only queues; nothing is processed or replied to yet.
+	if len(fake.replies) != 0 {
+		t.Fatalf("replies before handling = %+v, want none", fake.replies)
+	}
+	offset, _, _ := st.GetKV(context.Background(), kvOffsetKey)
+	if offset != "103" {
+		t.Errorf("offset = %q, want 103", offset)
+	}
+	events, err := st.RecentEvents(context.Background(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 3 {
+		t.Fatalf("queued %d events, want 3 (one per fixture update, no duplicates)", len(events))
+	}
+
+	for i := len(events) - 1; i >= 0; i-- {
+		if err := syncer.HandleEvent(context.Background(), events[i].Payload); err != nil {
+			t.Fatalf("HandleEvent(%d): %v", events[i].ID, err)
+		}
+	}
+	job, _ := st.GetJob(context.Background(), 1)
+	if job.Status != store.StatusApplied {
+		t.Errorf("job status = %q, want applied", job.Status)
+	}
+	if len(fake.replies) != 1 || fake.replies[0].MessageID != 501 {
+		t.Errorf("replies = %+v, want one reply to message 501", fake.replies)
+	}
+}

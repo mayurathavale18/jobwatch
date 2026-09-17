@@ -48,6 +48,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/connections", s.handleAPIConnectionsUpload)
 	mux.HandleFunc("GET /api/connections", s.handleAPIConnections)
 	mux.HandleFunc("GET /api/cron", s.handleAPICron)
+	mux.HandleFunc("GET /api/events", s.handleAPIEvents)
 	mux.HandleFunc("POST /api/cron/{name}/run", s.handleAPICronRun)
 	mux.Handle("/", s.spaHandler())
 	return withLogging(mux)

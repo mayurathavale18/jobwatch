@@ -5,6 +5,7 @@ package tgsync
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/url"
@@ -125,6 +126,88 @@ func (s *Syncer) Run(ctx context.Context) (Result, error) {
 	return result, nil
 }
 
+// Listen long-polls Telegram until ctx is cancelled, durably enqueueing each
+// batch of updates as telegram_update events in the same transaction that
+// advances the offset, then calls onEnqueued so workers start immediately.
+// Processing happens in HandleEvent, run by the event worker -- this loop
+// never blocks on a slow fix/outreach script.
+//
+// Must be the bot's only getUpdates consumer: don't run the tg-sync command
+// (or a second worker) against the same bot while this is running.
+func (s *Syncer) Listen(ctx context.Context, onEnqueued func()) error {
+	backoff := time.Second
+	for ctx.Err() == nil {
+		offset, err := s.loadOffset(ctx)
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil
+			}
+			return fmt.Errorf("loading offset: %w", err)
+		}
+		polledAt := time.Now()
+		updates, err := s.TG.GetUpdates(ctx, offset)
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil
+			}
+			slog.Error("tg-listen: getUpdates failed, backing off", "error", err, "backoff", backoff)
+			select {
+			case <-ctx.Done():
+				return nil
+			case <-time.After(backoff):
+			}
+			backoff = min(backoff*2, time.Minute)
+			continue
+		}
+		backoff = time.Second
+		if len(updates) == 0 {
+			// A real long poll only returns empty after its timeout; an
+			// instant empty answer means no long polling (misconfigured
+			// timeout), so don't spin against the Bot API.
+			if time.Since(polledAt) < time.Second {
+				select {
+				case <-ctx.Done():
+				case <-time.After(time.Second):
+				}
+			}
+			continue
+		}
+
+		payloads := make([]string, 0, len(updates))
+		next := offset
+		for _, u := range updates {
+			b, err := json.Marshal(u)
+			if err != nil {
+				return fmt.Errorf("encoding update %d: %w", u.UpdateID, err)
+			}
+			payloads = append(payloads, string(b))
+			next = max(next, u.UpdateID+1)
+		}
+		// Deliberately not ctx: a shutdown arriving mid-batch must not abort
+		// the write of updates Telegram has already handed over.
+		if err := s.Store.EnqueueEventsSetKV(context.WithoutCancel(ctx), store.EventTelegramUpdate, payloads, kvOffsetKey, strconv.FormatInt(next, 10)); err != nil {
+			// Offset not advanced, so Telegram redelivers these next poll.
+			slog.Error("tg-listen: enqueueing updates failed", "error", err, "count", len(updates))
+			continue
+		}
+		onEnqueued()
+	}
+	return nil
+}
+
+// HandleEvent processes one queued telegram_update event.
+// ponytail: events run concurrently, so two replies to the same job sent
+// within a second of each other ("applied" then "rejected") may apply out of
+// order. Serialize per job id if that ever bites.
+func (s *Syncer) HandleEvent(ctx context.Context, payload string) error {
+	var upd notify.Update
+	if err := json.Unmarshal([]byte(payload), &upd); err != nil {
+		return fmt.Errorf("decoding update: %w", err)
+	}
+	_, err := s.processUpdate(ctx, upd)
+	return err
+}
+
 func (s *Syncer) loadOffset(ctx context.Context) (int64, error) {
 	value, ok, err := s.Store.GetKV(ctx, kvOffsetKey)
 	if err != nil {
@@ -182,6 +265,9 @@ func (s *Syncer) processUpdate(ctx context.Context, upd notify.Update) (bool, er
 		slog.Warn("tg-sync: job not found for reply",
 			"update_id", upd.UpdateID, "message_id", msg.MessageID, "job_id", jobID,
 			"reply_text", msg.Text, "replied_to_text", repliedText)
+		// Release the store's single connection before the network call, so
+		// concurrent event workers aren't blocked on it.
+		_ = tx.Rollback()
 		return false, s.TG.Reply(ctx, msg.MessageID, fmt.Sprintf("Job #J%d not found.", jobID))
 	}
 	if err != nil {
@@ -193,6 +279,7 @@ func (s *Syncer) processUpdate(ctx context.Context, upd notify.Update) (bool, er
 
 	if mode, instruction, ok := parseFixOrUpdate(text); ok {
 		if mode == "update" && instruction == "" {
+			_ = tx.Rollback()
 			return false, s.TG.Reply(ctx, msg.MessageID, updateNeedsInstructionMessage)
 		}
 		if err := tx.Rollback(); err != nil && err != sql.ErrTxDone {
@@ -228,6 +315,7 @@ func (s *Syncer) processUpdate(ctx context.Context, upd notify.Update) (bool, er
 
 	status, ok := ParseStatusKeyword(firstWord)
 	if !ok {
+		_ = tx.Rollback()
 		return false, s.TG.Reply(ctx, msg.MessageID, helpMessage)
 	}
 

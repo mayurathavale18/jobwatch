@@ -1,0 +1,33 @@
+# Applied by .github/workflows/deploy.yml on every deploy.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jobwatch-worker
+spec:
+  replicas: 1
+  # Never run two workers at once: both would poll the same Telegram bot.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels: {app: jobwatch-worker}
+  template:
+    metadata:
+      labels: {app: jobwatch-worker}
+    spec:
+      # Lets an in-flight resume fix/outreach finish on deploy (SIGTERM stops
+      # new claims; running handlers complete). Anything still running at
+      # SIGKILL is re-queued on the next start.
+      terminationGracePeriodSeconds: 120
+      containers:
+        - name: worker
+          image: docker.io/library/jobwatch-runtime:v1
+          imagePullPolicy: Never
+          workingDir: /opt/jobwatch
+          command: ["/opt/jobwatch/scripts/worker.sh"]
+          volumeMounts:
+            - name: data
+              mountPath: /opt/jobwatch
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: jobwatch-data

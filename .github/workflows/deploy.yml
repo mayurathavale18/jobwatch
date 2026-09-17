@@ -38,7 +38,7 @@ jobs:
             resume/master.tex resume/facts.md resume/preferences.md \
             root@169.58.234.131:/tmp/jobwatch_deploy/
 
-      - name: Install into PVC, rebuild binary, restart dashboard
+      - name: Install into PVC, rebuild binary, restart dashboard + worker
         run: |
           ssh -i ~/.ssh/deploy_key -p 2222 root@169.58.234.131 '
             set -e
@@ -49,4 +49,9 @@ jobs:
             kubectl exec deploy/jobwatch -- bash -c "cd /opt/jobwatch && go build -o bin/jobwatch ./cmd/jobwatch"
             kubectl rollout restart deploy/jobwatch
             kubectl rollout status deploy/jobwatch --timeout=180s
+            # apply creates the worker on first deploy; restart picks up the
+            # new binary on later ones (Recreate: old pod stops polling first).
+            kubectl apply -f "$PVC/deploy/k8s/jobwatch-worker.yaml"
+            kubectl rollout restart deploy/jobwatch-worker
+            kubectl rollout status deploy/jobwatch-worker --timeout=300s
           '
