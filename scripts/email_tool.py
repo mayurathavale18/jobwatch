@@ -233,6 +233,9 @@ ACTIONS = {"generate": generate, "revise": revise, "save_draft": save_draft, "se
 
 
 def main():
+    # tailor_resume.log() prints to stdout; route it to stderr so stdout
+    # carries only the one JSON response the Go side parses.
+    out, sys.stdout = sys.stdout, sys.stderr
     try:
         req = json.load(sys.stdin)
         action = ACTIONS.get(req.get("action", ""))
@@ -242,6 +245,8 @@ def main():
             resp = action(req)
     except Exception as e:  # never crash: the Go side only parses stdout
         resp = {"ok": False, "error": str(e)}
+    finally:
+        sys.stdout = out
     json.dump(resp, sys.stdout)
 
 

@@ -15,6 +15,7 @@ import subprocess
 import sys
 import time
 import html
+import uuid
 from datetime import datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -62,7 +63,10 @@ TG_CHAT = os.environ.get("JOBWATCH_TG_CHAT", "")
 # bounded bullet rewording (Task 13) -- never for resume content selection.
 OPENCODE_API_KEY = os.environ.get("OPENCODE_API_KEY", "")
 OPENCODE_BASE_URL = "https://opencode.ai/zen/go/v1"
-DEFAULT_OPENCODE_MODEL = "deepseek-v4-pro"
+# deepseek-v4-pro went China-hosted-only (403 RegionError) around Sep 2026;
+# not opted in, since prompts carry resume/contact data.
+DEFAULT_OPENCODE_MODEL = "kimi-k3"
+OPENCODE_FALLBACK_MODELS = ["glm-5.3"]
 
 # Separate, independently-swappable model for outreach-email drafting --
 # same OpenCode Go gateway/subscription as tailoring's LLM calls, but its
@@ -245,31 +249,38 @@ def call_opencode(system_prompt, user_content, model=DEFAULT_OPENCODE_MODEL, tim
     if not OPENCODE_API_KEY:
         return None
 
-    payload = json.dumps({
-        "model": model,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_content},
-        ],
-    }).encode("utf-8")
-
-    try:
-        req = Request(
-            f"{OPENCODE_BASE_URL}/chat/completions",
-            data=payload,
-            method="POST",
-            headers={
-                "Authorization": f"Bearer {OPENCODE_API_KEY}",
-                "Content-Type": "application/json",
-                "User-Agent": "jobwatch-resume-tailor/1.0",
-            },
-        )
-        with urlopen(req, timeout=timeout) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-        return data["choices"][0]["message"]["content"]
-    except Exception as e:
-        log(f"WARN: OpenCode call failed: {e}")
-        return None
+    # Try the requested model, then the fallback: a single model being
+    # pulled or region-locked upstream (deepseek-v4-pro, Sep 2026) otherwise
+    # silently degrades every verdict to rule-based for as long as nobody
+    # reads the logs.
+    models = [model] + [m for m in OPENCODE_FALLBACK_MODELS if m != model]
+    for m in models:
+        payload = json.dumps({
+            "model": m,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_content},
+            ],
+        }).encode("utf-8")
+        try:
+            req = Request(
+                f"{OPENCODE_BASE_URL}/chat/completions",
+                data=payload,
+                method="POST",
+                headers={
+                    "Authorization": f"Bearer {OPENCODE_API_KEY}",
+                    "Content-Type": "application/json",
+                    "User-Agent": "jobwatch-resume-tailor/1.0",
+                    # Required by most Console Go models (400 MissingSessionID without it).
+                    "x-opencode-session": f"jobwatch-{uuid.uuid4()}",
+                },
+            )
+            with urlopen(req, timeout=timeout) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            return data["choices"][0]["message"]["content"]
+        except Exception as e:
+            log(f"WARN: OpenCode call failed ({m}): {e}")
+    return None
 
 
 def _apollo_post(path, payload, timeout=15):
