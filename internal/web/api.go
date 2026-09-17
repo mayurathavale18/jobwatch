@@ -31,10 +31,12 @@ type apiJob struct {
 	FounderName       string `json:"founderName"`
 	FounderEmail      string `json:"founderEmail"`
 	OutreachDraftedAt string `json:"outreachDraftedAt"`
+	FitScore          *int64 `json:"fitScore"`
+	WorkMode          string `json:"workMode"`
 }
 
 func toAPIJob(j store.JobRow) apiJob {
-	return apiJob{
+	out := apiJob{
 		ID:                j.ID,
 		CompanySlug:       j.CompanySlug,
 		CompanyName:       j.CompanyName,
@@ -49,7 +51,12 @@ func toAPIJob(j store.JobRow) apiJob {
 		FounderName:       j.FounderName,
 		FounderEmail:      j.FounderEmail,
 		OutreachDraftedAt: j.OutreachDraftedAt,
+		WorkMode:          j.WorkMode,
 	}
+	if j.FitScore.Valid {
+		out.FitScore = &j.FitScore.Int64
+	}
+	return out
 }
 
 type apiPollRun struct {

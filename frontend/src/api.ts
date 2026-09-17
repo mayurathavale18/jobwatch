@@ -13,6 +13,8 @@ export interface Job {
   founderName: string
   founderEmail: string
   outreachDraftedAt: string
+  fitScore: number | null
+  workMode: string
 }
 
 export interface PollRun {

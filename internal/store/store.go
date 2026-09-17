@@ -127,6 +127,8 @@ CREATE TABLE IF NOT EXISTS kv (
 	_, _ = s.db.Exec(`ALTER TABLE jobs ADD COLUMN founder_name TEXT NOT NULL DEFAULT ''`)
 	_, _ = s.db.Exec(`ALTER TABLE jobs ADD COLUMN founder_email TEXT NOT NULL DEFAULT ''`)
 	_, _ = s.db.Exec(`ALTER TABLE jobs ADD COLUMN outreach_drafted_at TEXT NOT NULL DEFAULT ''`)
+	_, _ = s.db.Exec(`ALTER TABLE jobs ADD COLUMN fit_score INTEGER`)
+	_, _ = s.db.Exec(`ALTER TABLE jobs ADD COLUMN work_mode TEXT NOT NULL DEFAULT ''`)
 	return nil
 }
 
@@ -282,6 +284,8 @@ type JobRow struct {
 	FounderName               string
 	FounderEmail              string
 	OutreachDraftedAt         string
+	FitScore                  sql.NullInt64
+	WorkMode                  string
 }
 
 // JobFilter narrows ListJobs results.
@@ -330,7 +334,7 @@ func filterWhere(f JobFilter) (string, []any) {
 
 func (s *Store) ListJobs(ctx context.Context, f JobFilter) ([]JobRow, error) {
 	where, args := filterWhere(f)
-	query := `SELECT id, provider, company_slug, company_name, external_id, title, location, url, posted_at, first_seen_at, status, notes, manual_jd_text, manual_outreach_instruction, outreach_status, founder_name, founder_email, outreach_drafted_at FROM jobs` + where
+	query := `SELECT id, provider, company_slug, company_name, external_id, title, location, url, posted_at, first_seen_at, status, notes, manual_jd_text, manual_outreach_instruction, outreach_status, founder_name, founder_email, outreach_drafted_at, fit_score, work_mode FROM jobs` + where
 	query += ` ORDER BY first_seen_at DESC, id DESC`
 	if f.Limit > 0 {
 		query += ` LIMIT ? OFFSET ?`
@@ -348,7 +352,7 @@ func (s *Store) ListJobs(ctx context.Context, f JobFilter) ([]JobRow, error) {
 		var j JobRow
 		if err := rows.Scan(&j.ID, &j.Provider, &j.CompanySlug, &j.CompanyName, &j.ExternalID,
 			&j.Title, &j.Location, &j.URL, &j.PostedAt, &j.FirstSeenAt, &j.Status, &j.Notes, &j.ManualJDText, &j.ManualOutreachInstruction,
-			&j.OutreachStatus, &j.FounderName, &j.FounderEmail, &j.OutreachDraftedAt); err != nil {
+			&j.OutreachStatus, &j.FounderName, &j.FounderEmail, &j.OutreachDraftedAt, &j.FitScore, &j.WorkMode); err != nil {
 			return nil, err
 		}
 		out = append(out, j)
@@ -385,11 +389,11 @@ func (s *Store) GetJobTx(ctx context.Context, tx *sql.Tx, id int64) (JobRow, err
 func getJobQuerier(ctx context.Context, q querier, id int64) (JobRow, error) {
 	var j JobRow
 	err := q.QueryRowContext(ctx,
-		`SELECT id, provider, company_slug, company_name, external_id, title, location, url, posted_at, first_seen_at, status, notes, manual_jd_text, manual_outreach_instruction, outreach_status, founder_name, founder_email, outreach_drafted_at FROM jobs WHERE id = ?`,
+		`SELECT id, provider, company_slug, company_name, external_id, title, location, url, posted_at, first_seen_at, status, notes, manual_jd_text, manual_outreach_instruction, outreach_status, founder_name, founder_email, outreach_drafted_at, fit_score, work_mode FROM jobs WHERE id = ?`,
 		id,
 	).Scan(&j.ID, &j.Provider, &j.CompanySlug, &j.CompanyName, &j.ExternalID,
 		&j.Title, &j.Location, &j.URL, &j.PostedAt, &j.FirstSeenAt, &j.Status, &j.Notes, &j.ManualJDText, &j.ManualOutreachInstruction,
-		&j.OutreachStatus, &j.FounderName, &j.FounderEmail, &j.OutreachDraftedAt)
+		&j.OutreachStatus, &j.FounderName, &j.FounderEmail, &j.OutreachDraftedAt, &j.FitScore, &j.WorkMode)
 	return j, err
 }
 
