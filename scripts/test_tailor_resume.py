@@ -1530,3 +1530,45 @@ def test_llm_judge_prompt_includes_preferences(monkeypatch):
     assert "PREFERS REMOTE" in captured["system"]
     # rule-based fallback still carries the fit keys
     assert j["fit_score"] is None and "work_mode" in j
+
+
+def _patch_process_job_pipeline(monkeypatch, tmp_path, fit_score):
+    monkeypatch.setattr(tr, "TAILORED_JSON_PATH", tmp_path / "tailored.json")
+    monkeypatch.setattr(tr, "OUTPUT_ROOT", tmp_path / "output")
+    monkeypatch.setattr(tr, "compile_tex", lambda tex_path: (True, ""))
+    monkeypatch.setattr(tr, "get_page_count", lambda pdf_path: 1)
+    monkeypatch.setattr(tr, "build_resume_fields", lambda job, jd_data, tight=False: ("skills", ["bullet"], "projects", "focus", ["kw"]))
+    monkeypatch.setattr(tr, "update_job_fit", lambda *a: None)
+    monkeypatch.setattr(tr, "run_outreach_step", lambda *a, **k: None)
+    monkeypatch.setattr(tr, "llm_judge", lambda *a: {
+        "verdict": "screen", "missing_keywords": [], "reason": "", "source": "llm",
+        "sector": None, "fit_score": fit_score, "work_mode": "onsite", "fit_reason": "US onsite, no visa"})
+    statuses, sends = [], []
+    monkeypatch.setattr(tr, "update_job_status", lambda job_id, status: statuses.append(status))
+    monkeypatch.setattr(tr, "send_telegram", lambda *a, **kw: (sends.append(1), (True, None))[1])
+    return statuses, sends
+
+
+def _jd_job(jid):
+    return {"id": jid, "company_name": "Acme", "title": "Backend Engineer", "url": "https://example.com/x",
+            "manual_jd_text": "Backend Engineer building Go microservices on Kubernetes with PostgreSQL at scale for payments."}
+
+
+def test_process_job_batch_skips_low_fit_without_notifying(monkeypatch, tmp_path):
+    statuses, sends = _patch_process_job_pipeline(monkeypatch, tmp_path, fit_score=20)
+    tailored, outcome = tr.process_job(_jd_job(7), {}, min_fit=45)
+    assert outcome == "skipped_low_fit"
+    assert sends == [] and statuses == ["ignored"]
+    assert tailored["7"]["status"] == "low_fit"
+
+
+def test_process_job_manual_path_notifies_even_when_low_fit(monkeypatch, tmp_path):
+    statuses, sends = _patch_process_job_pipeline(monkeypatch, tmp_path, fit_score=20)
+    tailored, outcome = tr.process_job(_jd_job(8), {})
+    assert outcome == "sent" and sends == [1]
+
+
+def test_process_job_null_fit_is_never_gated(monkeypatch, tmp_path):
+    statuses, sends = _patch_process_job_pipeline(monkeypatch, tmp_path, fit_score=None)
+    tailored, outcome = tr.process_job(_jd_job(9), {}, min_fit=45)
+    assert outcome == "sent"

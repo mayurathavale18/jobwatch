@@ -52,6 +52,10 @@ TODAY_ISO = datetime.now().strftime("%Y-%m-%d")
 
 MAX_PER_CYCLE = 8
 DAILY_BUDGET = 20
+# Batch-tailored jobs scoring below this preference fit (llm_judge's
+# fit_score, 0-100) are marked ignored instead of sent to Telegram, and
+# don't count against DAILY_BUDGET. Visible in the dashboard's Fit column.
+MIN_FIT_TO_NOTIFY = 45
 RATE_LIMIT_SECONDS = 60
 
 # Telegram config from environment
@@ -1837,7 +1841,7 @@ def fetch_jd_text_for_job(job):
 
     return jd_data.get("content_text", ""), jd_unavailable
 
-def process_job(job, tailored):
+def process_job(job, tailored, min_fit=0):
     """Process one job dict from the jobs table: fetch JD (Greenhouse API,
     falling back to fetch_jd_generic for anything else), generate and
     compile the resume, score it, judge it, and send Telegram. Mutates and
@@ -1960,6 +1964,16 @@ def process_job(job, tailored):
     save_tailored(tailored)
     update_job_fit(jid, judgment.get("fit_score"), judgment.get("work_mode"))
 
+    # Only the batch path passes min_fit; a job Mayur submitted by hand
+    # always notifies. A null fit (rule-based fallback) is never gated --
+    # no LLM signal isn't evidence of a bad fit.
+    if judgment.get("fit_score") is not None and judgment["fit_score"] < min_fit:
+        log(f"  SKIPPED (low fit {judgment['fit_score']} < {min_fit}): {judgment.get('fit_reason', '')}")
+        tailored[jid]["status"] = "low_fit"
+        save_tailored(tailored)
+        update_job_status(jid, "ignored")
+        return tailored, "skipped_low_fit"
+
     log(f"  Sending Telegram notification...")
     tg_ok, tg_error = send_telegram(pdf_path, company, title, url, score, jid, judgment=judgment,
                                      hedged_keywords=tiered["hedged"], jd_unavailable=jd_unavailable)
@@ -2038,27 +2052,27 @@ def main():
 
     processed = 0
     failed = 0
-    skipped_non_eng = 0
+    skipped = 0
 
-    for job in jobs[:to_process + 5]:  # allow buffer for non-eng skips
+    for job in jobs[:to_process + 12]:  # buffer for non-eng/over-experience/low-fit skips
         if processed >= to_process:
             break
 
-        tailored, outcome = process_job(job, tailored)
+        tailored, outcome = process_job(job, tailored, min_fit=MIN_FIT_TO_NOTIFY)
 
         if outcome == "sent":
             processed += 1
         elif outcome == "failed":
             failed += 1
-        elif outcome == "skipped_non_eng":
-            skipped_non_eng += 1
+        else:
+            skipped += 1
 
         if outcome == "sent" and processed < to_process:
             log(f"  Rate limit: sleeping {RATE_LIMIT_SECONDS}s...")
             time.sleep(RATE_LIMIT_SECONDS)
 
     log(f"\n=== Cycle complete ===")
-    log(f"Processed: {processed}, Failed: {failed}, Skipped non-eng: {skipped_non_eng}")
+    log(f"Processed: {processed}, Failed: {failed}, Skipped: {skipped}")
 
 
 def _parse_rebuild_cli_args(argv):
