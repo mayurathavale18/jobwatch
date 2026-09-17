@@ -1,0 +1,29 @@
+{
+  "0-legal-notice": "Legal warning - please link back to Remotive.",
+  "job-count": 2,
+  "jobs": [
+    {
+      "id": 2069746,
+      "url": "https://remotive.com/remote-jobs/software-development/backend-engineer-2069746",
+      "title": "Backend Engineer",
+      "company_name": "Acme Corp",
+      "company_logo": "https://remotive.com/job/2069746/logo",
+      "category": "Software Development",
+      "tags": ["go", "kubernetes"],
+      "job_type": "full_time",
+      "publication_date": "2026-09-14T20:33:27",
+      "candidate_required_location": "India",
+      "salary": "$60k",
+      "description": "<p>stuff</p>"
+    },
+    {
+      "id": 2069747,
+      "url": "https://remotive.com/remote-jobs/software-development/platform-engineer-2069747",
+      "title": "Platform Engineer",
+      "company_name": "WidgetCo",
+      "publication_date": "",
+      "candidate_required_location": "",
+      "description": ""
+    }
+  ]
+}
