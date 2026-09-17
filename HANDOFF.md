@@ -1,10 +1,30 @@
 # jobwatch — session handoff
 
-Last updated: 2026-07-30, end of session (second session of the day). Read this first — it replaces everything before it, which is now stale. Also read `CLAUDE.md` for the command-level quick reference (SSH, deploy commands, recurring gotchas); this file is the narrative "what happened and why" context.
+Last updated: 2026-09-17. Read this first. Also read `CLAUDE.md` for the command-level reference — **prod is now k3s on Contabo, not EC2**; every EC2/`ubuntu@16.113.24.110`/systemd reference in the older sections below is historical.
 
-## Start here next session
+## Context (Sep 2026)
 
-The two founder-outreach extensions that were queued at the end of the previous 2026-07-30 session **both shipped this session** — see "What shipped 2026-07-30 (session 2)" below. No known outstanding work on founder-outreach right now; check "Known gaps" for everything else still open.
+Mayur has a 21 LPA AI-role offer (found outside jobwatch) and is on a 2-month notice from 15 Sep 2026. jobwatch is now a real search tool: targets are 25 / 30 / 30+ LPA, remote > hybrid > onsite, no visa for anywhere outside India, company preference well-funded startups > MNC/MAANG > mid-size startups. All of that lives in `resume/preferences.md`, which is fed verbatim into the LLM verdict.
+
+## What shipped 2026-09-17 (PRs #9–#16, all merged + auto-deployed + verified on prod)
+
+1. **CD fixed (#9, + addr commit)**: `deploy.yml` still targeted the dead EC2 box. Now rsyncs to Contabo (sshd on **port 2222**), copies into the `jobwatch-data` PVC path, `go build` via `kubectl exec`, rollout restart. New deploy key → `CONTABO_SSH_KEY` secret. First run crash-looped the dashboard because the repo's `config.yaml` had `127.0.0.1:8787` (k8s probes need `0.0.0.0`) — fixed in repo.
+2. **LLM was down for 9+ days (#15)**: `deepseek-v4-pro` became China-hosted-only (403 RegionError) around 2026-09-08, so every verdict silently fell back to rule-based. Switched to `kimi-k3` with `glm-5.3` fallback; Console Go models require an `x-opencode-session` header. Did NOT opt into China hosting (prompts carry resume/PII).
+3. **Preference fit (#10, #16)**: `llm_judge` returns `fit_score`/`work_mode`/`fit_reason` on the same call → `jobs.fit_score`/`work_mode` columns, dashboard Fit column, Telegram Fit line. Batch jobs under `MIN_FIT_TO_NOTIFY = 45` are marked ignored (tailored.json status `low_fit`) instead of notified; manual submissions always notify; null fit never gated.
+4. **Filter accuracy (#12)**: location filter was substring "remote", so "Remote, United States"/"US - Remote" passed. New `locations_exclude` (segment-aware on `;`/`|`). `jobwatch refilter` re-applies filters to `status=new` rows — ran on prod: 96 of 123 queued jobs were noise. Tailor queue is now remote-first then newest.
+5. **Sources (#11)**: Remotive aggregator provider + 22 live-verified companies (Anthropic, OpenAI, Vercel, Figma, GitLab, Datadog, MongoDB, Grafana, Cockroach, Airbnb, Reddit, DoorDash, Scale AI, Groww, Supabase, Linear, ElevenLabs, Sierra, ClickHouse, Cohere, Perplexity, Temporal, Spotify, Palantir). Marqeta removed (404). 52 sources polling OK.
+6. **Email composer + referrals (#13, fix in #15)**: `/connections` imports a LinkedIn data-export `Connections.csv`; `/jobs/{id}/email` shows connections at that company + composer (AI generate, AI revise-by-instruction, save/update Gmail draft with blank To: allowed, send with confirm). Go proxies synchronously to `scripts/email_tool.py`, which loads `.env` itself (dashboard pod has no env). Live-verified `generate` on prod; did NOT live-test save_draft/send (would touch real Gmail). **No connections imported yet** — Mayur needs to upload the CSV.
+7. **Resume (#14)**: bullets rebuilt from facts.md metrics (5k+ DAU / 100k+ convos/day, 100M tokens/day, 1k–10k RPS @ 100ms P95, 10M+ docs…); JD keyword gaps now go to "Also"/"Familiarity with" skills lines instead of appended bullet sentences; jobwatch added as a project; stray bullet glyph fixed. 7 variants compiled to 1 page in the prod pod.
+
+## Open / next
+
+- Poller's raw per-job Telegram alerts (pre-LLM, title+location only) still fire alongside the fit-gated tailored ones. Candidate: drop them or make them a daily digest.
+- Wellfound/LinkedIn/Naukri/Instahyre/Cutshort not added — no official APIs; would need scraping/headless.
+- Apollo free tier still can't find recruiter/founder emails; composer handles the blank-To: case.
+- facts.md `[FILL]` stories are still empty — fill them to unlock stronger bullets.
+- CollateralFi remains in master.tex projects as "Designing and building" — confirm it's still real or drop it.
+
+## Earlier: founder-outreach extensions (2026-07-30)
 
 ## What shipped 2026-07-30 (session 2): founder-outreach extensions
 
