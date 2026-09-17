@@ -461,7 +461,9 @@ def test_inject_keyword_emphasis_hedges_familiar_tier_keyword():
     combined = new_bullets[0] + (extra_line or "")
     assert "Kafka" in combined
     # Must use hedging language, not a plain/confident claim.
-    assert any(hedge in combined for hedge in ("exposure to", "familiarity with", "working knowledge of"))
+    assert any(hedge in combined.lower() for hedge in ("exposure to", "familiarity with", "working knowledge of"))
+    # Bullets are never mutated -- gaps land on skills lines only.
+    assert new_bullets == bullets
 
 
 def test_inject_keyword_emphasis_never_touches_fabrication_risk_keyword():
@@ -475,18 +477,17 @@ def test_inject_keyword_emphasis_never_touches_fabrication_risk_keyword():
 
 
 def test_inject_keyword_emphasis_overflow_hedged_keywords_stay_hedged():
-    # More than MAX_INJECTED_KEYWORDS (3) hedged-tier gaps -- the overflow
-    # must NOT land in the plain "Additional Relevant Skills" line unhedged.
+    # Many hedged-tier gaps -- none may land on the plain "Also" line.
     bullets = ["Built a backend service using Go and PostgreSQL."]
     skills_section = "\\techSkill{Languages}{Go, Python}"
     # kafka, rabbitmq, gcp, firebase are all hedged_familiar; cassandra, bigquery are hedged_adjacent
     jd_keywords = ["kafka", "rabbitmq", "gcp", "firebase", "cassandra", "bigquery"]
 
     new_bullets, extra_line = tr.inject_keyword_emphasis(bullets, skills_section, jd_keywords)
-    combined = new_bullets[0] + (extra_line or "")
-    assert "Additional Relevant Skills" not in combined or "Additional Exposure" in combined
+    assert new_bullets == bullets
+    assert "\\techSkill{Also}" not in (extra_line or "")
     # Nothing from the hedged set should appear as a bare claim outside hedge context
-    assert "\\techSkill{Additional Exposure}" in (extra_line or "")
+    assert "\\techSkill{Familiarity with}{Kafka" in (extra_line or "")
 
 
 def test_classify_keyword_kubernetes_langchain_mongodb_trpc_not_familiar():
@@ -1386,7 +1387,7 @@ def test_run_outreach_step_bypasses_gate_with_email_extracted_from_manual_instru
         return {"subject": "Hi", "body": "Body"}
 
     monkeypatch.setattr(tr, "draft_outreach_email", fake_draft)
-    monkeypatch.setattr(tr, "create_gmail_draft", lambda *a, **k: (True, None))
+    monkeypatch.setattr(tr, "create_gmail_draft", lambda *a, **k: (True, None, None))
     monkeypatch.setattr(tr, "update_outreach_fields", lambda *a, **k: None)
     monkeypatch.setattr(tr, "send_telegram_message", lambda text: (True, None))
     job = {
@@ -1408,7 +1409,7 @@ def test_run_outreach_step_feeds_instruction_context_even_without_extractable_em
         return {"subject": "Hi", "body": "Body"}
 
     monkeypatch.setattr(tr, "draft_outreach_email", fake_draft)
-    monkeypatch.setattr(tr, "create_gmail_draft", lambda *a, **k: (True, None))
+    monkeypatch.setattr(tr, "create_gmail_draft", lambda *a, **k: (True, None, None))
     monkeypatch.setattr(tr, "update_outreach_fields", lambda *a, **k: None)
     monkeypatch.setattr(tr, "send_telegram_message", lambda text: (True, None))
     job = {

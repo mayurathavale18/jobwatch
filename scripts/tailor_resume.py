@@ -872,48 +872,54 @@ def _jd_first_order(skills_str, jd_keywords):
     return ", ".join(matched + unmatched)
 
 
+# Base skill categories. Sub-technologies are flattened into the top-level
+# comma list rather than nested in parens (e.g. "AWS, ECS, EC2, ..." not
+# "AWS (ECS, EC2, ...)") -- ATS skill-taggers that split on top-level commas
+# only were reading the parenthetical form as one long unmatched string
+# instead of recognizing each technology as its own keyword. Must match
+# master.tex's Skills section -- tailored resumes overwrite that section
+# wholesale from here. Every entry must be production/used tier in facts.md.
+BASE_SKILLS = {
+    "Languages": "Go, Python, TypeScript, JavaScript, SQL, Bash",
+    "AI/LLM": "LangGraph, LangChain, RAG, Hybrid Search, KNN, BM25, Multi-Agent Orchestration, LiteLLM, MCP, Azure AI Foundry, SSE Streaming",
+    "Backend": "REST APIs, Microservices, FastAPI, Gin, NestJS, Node.js, KrakenD, GraphQL, Hasura, Temporal, Event-driven Architecture, Webhooks",
+    "Data": "PostgreSQL, Aurora MySQL, Redis, Valkey, DynamoDB, OpenSearch, MongoDB, Spark, S3 Tables, SQS, SNS, DynamoDB Streams, EventBridge",
+    "Infrastructure": "AWS, ECS Fargate, EC2, RDS, Lambda, CloudFront, Secrets Manager, CloudWatch, Terraform, Docker, Kubernetes, GitHub Actions",
+    "Frontend": "React, Next.js, Vite, NX, Module Federation, React Native, PWA",
+    "Concepts": "System Design, Distributed Systems, Concurrency, Multi-Tenant Architecture, Idempotency, Observability, Resiliency Patterns",
+}
+
+
+def _skill_categories(jd_keywords):
+    """BASE_SKILLS plus truthful JD-driven additions (e.g. Java for Stripe
+    roles, which facts.md lists as used-tier)."""
+    categories = dict(BASE_SKILLS)
+    jd_text_lower = ", ".join(jd_keywords).lower()
+    if keyword_in_text("java", jd_text_lower):
+        categories["Languages"] = "Go, Python, TypeScript, JavaScript, Java, SQL, Bash"
+    if any(k in jd_text_lower for k in ("observability", "monitoring", "metrics", "logging")):
+        categories["Infrastructure"] += ", CloudWatch Metrics, Structured Logging"
+    return categories
+
+
 def build_skills_section(focus, jd_keywords):
     """Build the Technical Skills section, reordered by relevance."""
-    # Base categories. Sub-technologies are flattened into the top-level
-    # comma list rather than nested in parens (e.g. "AWS, ECS, EC2, ..."
-    # not "AWS (ECS, EC2, ...)") -- ATS skill-taggers that split on
-    # top-level commas only were reading the parenthetical form as one long
-    # unmatched string instead of recognizing each technology as its own
-    # keyword. Must match master.tex's Skills section structure (see its
-    # own comment) -- this function overwrites that section wholesale for
-    # every tailored resume, so drift here silently undoes that fix.
-    categories = {
-        "Languages": "Go, Python, TypeScript, JavaScript, SQL, Bash",
-        "Backend": "REST APIs, Microservices, FastAPI, NestJS, Node.js, API Gateways, KrakenD, Event-driven Architecture, SQS, SNS, DynamoDB Streams, Temporal Workflows",
-        "Databases": "PostgreSQL, MySQL, Redis, DynamoDB, OpenSearch, MongoDB",
-        "Infrastructure": "AWS, ECS, EC2, RDS, SQS, SNS, DynamoDB, Lambda, Secrets Manager, CloudWatch, Terraform, Docker, Kubernetes, GitHub Actions",
-        "AI/LLM": "LangGraph, LangChain, RAG Pipelines, OpenSearch, KNN, BM25, Multi-Agent Orchestration",
-        "Frontend": "React, Next.js 14, TypeScript, GraphQL, tRPC",
-        "Concepts": "System Design, Distributed Systems, Concurrency, Multi-Tenant Architecture, Secure Coding, SOLID, Resiliency Patterns",
-    }
-
-    # Add truthful skills mentioned in JD but not in base categories
-    # e.g. Java for Stripe roles
-    jd_text_lower = ", ".join(jd_keywords).lower()
-    if "java" in jd_text_lower and "java" not in categories["Languages"].lower():
-        categories["Languages"] = "Go, Python, TypeScript, JavaScript, Java, SQL, Bash"
-    if "spark" in jd_text_lower:
-        categories["Databases"] = "PostgreSQL, MySQL, Redis, DynamoDB, OpenSearch, MongoDB, Spark, S3 Tables"
-    if "observability" in jd_text_lower or "monitoring" in jd_text_lower or "metrics" in jd_text_lower or "logging" in jd_text_lower:
-        categories["Infrastructure"] = "AWS, ECS, EC2, RDS, SQS, SNS, DynamoDB, Lambda, Secrets Manager, CloudWatch, Terraform, Docker, Kubernetes, GitHub Actions, CloudWatch Metrics, Structured Logging"
+    categories = _skill_categories(jd_keywords)
 
     # Reorder categories based on focus
     order = []
     if "observability" in focus:
-        order = ["Infrastructure", "Languages", "Backend", "Databases", "AI/LLM", "Concepts", "Frontend"]
+        order = ["Infrastructure", "Languages", "Backend", "Data", "AI/LLM", "Concepts", "Frontend"]
     elif "ai_llm" in focus or "data" in focus:
-        order = ["AI/LLM", "Languages", "Backend", "Databases", "Infrastructure", "Concepts", "Frontend"]
+        order = ["AI/LLM", "Languages", "Backend", "Data", "Infrastructure", "Concepts", "Frontend"]
     elif "networking" in focus or "security" in focus:
-        order = ["Backend", "Languages", "Infrastructure", "Databases", "AI/LLM", "Concepts", "Frontend"]
+        order = ["Backend", "Languages", "Infrastructure", "Data", "AI/LLM", "Concepts", "Frontend"]
     elif "forward_deployed" in focus:
-        order = ["AI/LLM", "Backend", "Languages", "Databases", "Infrastructure", "Concepts", "Frontend"]
+        order = ["AI/LLM", "Backend", "Languages", "Data", "Infrastructure", "Concepts", "Frontend"]
+    elif "full_stack" in focus:
+        order = ["Languages", "Backend", "Frontend", "Data", "Infrastructure", "AI/LLM", "Concepts"]
     else:
-        order = ["Languages", "Backend", "Infrastructure", "Databases", "AI/LLM", "Concepts", "Frontend"]
+        order = ["Languages", "Backend", "AI/LLM", "Infrastructure", "Data", "Concepts", "Frontend"]
 
     # Limit to 6 categories if we need to save space (handled by caller via tight flag)
     lines = []
@@ -923,37 +929,48 @@ def build_skills_section(focus, jd_keywords):
 
 def build_experience_bullets(focus, jd_keywords, tight=False):
     """Return ordered list of experience bullets, most relevant first."""
+    # Every claim and number here must trace to resume/facts.md. Impact and
+    # scale lead each bullet (what a recruiter reads in a 5-10s scan), the
+    # stack follows. Order within the list is the default when focus ties.
     all_bullets = [
         {
-            "text": "Built and owned a \\textbf{Go-based API gateway} routing traffic across \\textbf{12 microservices} --- implemented auth middleware, rate limiting, and request routing with full KrakenD configuration; applied concurrency patterns to handle high-throughput routing safely.",
-            "focus": ["backend", "security", "distributed"],
+            "text": "Architected and shipped an \\textbf{agentic AI copilot} (FastAPI, LangGraph multi-agent orchestration) from POC to production, serving \\textbf{5k+ DAU} and \\textbf{100k+ conversations/day}; drove a \\textbf{200\\%+} increase in daily sales leads.",
+            "focus": ["ai_llm", "forward_deployed", "backend"],
         },
         {
-            "text": "Designed \\textbf{event-driven automation pipelines} using SQS, SNS, DynamoDB Streams, and webhooks; modelled data flows for reliability, idempotency, and explicit failure-mode handling across async consumers.",
+            "text": "Built \\textbf{hybrid-retrieval RAG} over OpenSearch (KNN vectors + BM25) with Redis + PostgreSQL storage, and \\textbf{4 streaming strategies} (SSE, AG-UI, LangGraph multi-mode) that drive agent-generated UI components.",
+            "focus": ["ai_llm", "data", "full_stack"],
+        },
+        {
+            "text": "Self-hosted a \\textbf{LiteLLM proxy} governing every model call on the platform: \\textbf{100M tokens/day} across 5 services, with per-source token tracking and plan-based budget enforcement.",
+            "focus": ["ai_llm", "backend", "observability"],
+        },
+        {
+            "text": "Wrote a \\textbf{Go (Gin + KrakenD) API gateway} fronting \\textbf{12 microservices}: auth middleware, rate limiting, and routing at \\textbf{1k RPS} steady / \\textbf{10k RPS} under load with \\textbf{100ms P95} latency.",
+            "focus": ["backend", "security", "networking", "distributed"],
+        },
+        {
+            "text": "Built the conversation \\textbf{ingestion pipeline} (Spark, S3 Tables, OpenSearch): threads and classifies \\textbf{10k+ messages} per 20-minute window into a \\textbf{10M+ document} embedding index at 1--2s latency per window.",
+            "focus": ["data", "ai_llm", "distributed"],
+        },
+        {
+            "text": "Built \\textbf{Temporal}-scheduled extraction agents monitoring \\textbf{20+} client WhatsApp groups (72 runs/day, 1k+ messages per tenant) into Google Sheets via tenant-specific guidance prompts; migrated the service from Python to TypeScript.",
+            "focus": ["ai_llm", "forward_deployed", "backend"],
+        },
+        {
+            "text": "Designed \\textbf{event-driven pipelines} on SQS, SNS, DynamoDB Streams, and webhooks with idempotency, retries, dead-letter handling, and reconciliation for missed or delayed events.",
             "focus": ["backend", "distributed", "data"],
         },
         {
-            "text": "Designed \\textbf{Temporal workflows with customized templates} to orchestrate agent-driven business processes; built APIs to deploy agents with \\textbf{customized guidance prompts}, enabling tenant-specific behavior.",
-            "focus": ["ai_llm", "backend", "forward_deployed"],
-        },
-        {
-            "text": "Extracted structured requirements from user \\textbf{WhatsApp messages} and synced them into attached \\textbf{Google Sheets}; triggered webhook events on manual cell updates to send templated WhatsApp messages or execute custom business logic.",
-            "focus": ["data", "forward_deployed"],
-        },
-        {
-            "text": "Owned \\textbf{AWS infrastructure via Terraform} (ECS Fargate, RDS, SQS, SNS, DynamoDB, Secrets Manager, Elasticache/Valkey); maintained GitHub Actions CI/CD with automated integration tests, cutting release cycles by \\textbf{35\\%}.",
+            "text": "Owned \\textbf{AWS infrastructure for 5 production services} via Terraform (ECS Fargate, RDS, Aurora, DynamoDB, ElastiCache, Lambda, CloudFront); GitHub Actions CI/CD with integration-test gates cut release cycles by \\textbf{35\\%}.",
             "focus": ["backend", "observability", "security"],
         },
         {
-            "text": "Built a \\textbf{RAG pipeline} with OpenSearch KNN + BM25 hybrid retrieval, Redis + PostgreSQL (RDS) dual-layer storage, and CloudWatch metrics and structured logging for observability.",
-            "focus": ["ai_llm", "data", "observability"],
+            "text": "Built a \\textbf{multi-tenant GraphQL layer} (Hasura + NestJS) with per-tenant dynamic schema generation, query guards, and role-based access control.",
+            "focus": ["backend", "security", "full_stack"],
         },
         {
-            "text": "Architected an \\textbf{agentic AI copilot} (FastAPI + LangGraph) that increased daily sales leads by \\textbf{200\\%+}; implemented 4 streaming strategies (SSE, AG-UI, LangGraph multi-mode).",
-            "focus": ["ai_llm", "forward_deployed"],
-        },
-        {
-            "text": "Migrated \\textbf{Webpack module-federation microfrontends to Vite} with a custom build runtime in NX: build times/latencies down \\textbf{70\\%}, dev build + local startup down \\textbf{80\\%} (with HMR).",
+            "text": "Migrated \\textbf{Webpack module-federation microfrontends to Vite} with a custom NX build runtime: build times down \\textbf{70\\%}, local dev startup down \\textbf{80\\%}.",
             "focus": ["frontend", "full_stack"],
         },
     ]
@@ -992,7 +1009,7 @@ def build_experience_bullets(focus, jd_keywords, tight=False):
 
     return [b["text"] for b in scored]
 
-MAX_INJECTED_KEYWORDS = 3
+MAX_SKILL_LINE_KEYWORDS = 6
 
 def inject_keyword_emphasis(bullets, skills_section, jd_keywords):
     """Close JD-keyword coverage gaps without fabricating anything.
@@ -1005,43 +1022,25 @@ def inject_keyword_emphasis(bullets, skills_section, jd_keywords):
     (score_coverage_tiered's "missing" bucket that isn't hedge-eligible)
     are never touched here.
     """
+    # Gaps go onto skills lines only, never appended to experience bullets:
+    # a bolted-on "Also applies X in this work." reads as keyword-stuffing
+    # to a human recruiter, while ATS parsers match the skills line just
+    # as well. Bullets are returned unchanged.
     draft_text = skills_section + "\n" + "\n".join(bullets)
-    result = score_coverage_tiered(jd_keywords, draft_text)
-
-    # Direct-tier gaps: present in jd_keywords, not yet in draft_text, and
-    # classify as "direct" (i.e. would have landed in old score_coverage's
-    # not_covered bucket).
     direct_gaps = [kw for kw in jd_keywords
                    if not keyword_in_text(kw, draft_text) and classify_keyword(kw) == "direct"]
     hedged_gaps = [kw for kw in jd_keywords
                    if not keyword_in_text(kw, draft_text)
                    and classify_keyword(kw) in ("hedged_familiar", "hedged_adjacent")]
 
-    if not direct_gaps and not hedged_gaps:
-        return bullets, None
-
-    bullets = list(bullets)
-    inject_direct, remaining_direct = direct_gaps[:MAX_INJECTED_KEYWORDS], direct_gaps[MAX_INJECTED_KEYWORDS:]
-    inject_hedged, remaining_hedged = hedged_gaps[:MAX_INJECTED_KEYWORDS], hedged_gaps[MAX_INJECTED_KEYWORDS:]
-
-    if inject_direct and bullets:
-        bolded = ", ".join(f"\\textbf{{{canonical_case(kw)}}}" for kw in inject_direct)
-        bullets[0] = bullets[0].rstrip() + f" Also applies {bolded} in this work."
-
-    if inject_hedged and bullets:
-        hedged_list = ", ".join(canonical_case(kw) for kw in inject_hedged)
-        bullets[0] = bullets[0].rstrip() + f" Has working exposure to {hedged_list} for adjacent needs."
-
     extra_lines = []
-    if remaining_direct:
-        plain = ", ".join(canonical_case(kw) for kw in remaining_direct)
-        extra_lines.append(f"\\techSkill{{Additional Relevant Skills}}{{{plain}}}")
-    if remaining_hedged:
-        hedged_plain = ", ".join(canonical_case(kw) for kw in remaining_hedged)
-        extra_lines.append(f"\\techSkill{{Additional Exposure}}{{{hedged_plain}}}")
-    extra_skills_line = "\n".join(extra_lines) if extra_lines else None
-
-    return bullets, extra_skills_line
+    if direct_gaps:
+        plain = ", ".join(canonical_case(kw) for kw in direct_gaps[:MAX_SKILL_LINE_KEYWORDS])
+        extra_lines.append(f"\\techSkill{{Also}}{{{plain}}}")
+    if hedged_gaps:
+        hedged_plain = ", ".join(canonical_case(kw) for kw in hedged_gaps[:MAX_SKILL_LINE_KEYWORDS])
+        extra_lines.append(f"\\techSkill{{Familiarity with}}{{{hedged_plain}}}")
+    return list(bullets), ("\n".join(extra_lines) if extra_lines else None)
 
 NUMBER_RE = re.compile(r"\d+(?:\.\d+)?%?")
 
@@ -1155,18 +1154,11 @@ def llm_reword_bullet(bullet_text, direct_keywords, hedged_keywords):
 def build_projects_section(focus, jd_keywords):
     """Build the Projects & Writing section."""
     projects = [
-        "\\resumeItem{\\textbf{zo-ai Conversation Threader} (Python, OpenSearch, LangGraph, FastAPI) --- Built the OpenSearch-backed dataset backbone for a copilot service: clustered non-contiguous WhatsApp messages into chronological threads using temporal proximity and semantic similarity, classified each thread into query types (custom, fixed, or LLM-discovered), and indexed semantic embeddings (titleVector, descriptionVector, queryTypeVector) for hybrid search retrieval of actionable items.}",
+        "\\resumeItem{\\textbf{jobwatch} (Go, Python, React, SQLite, k3s) --- Personal AI job-search agent: polls 50+ company ATS boards and job aggregators, scores each role with an LLM against a preference profile, generates a JD-tailored one-page LaTeX resume under a truth-lock (no unverified claims), and drafts Gmail outreach; self-hosted on k3s with GitHub Actions CD.}",
         "\\resumeItem{\\textbf{\\extlink{https://github.com/mayurathavale18/pr-manager}{\\underline{PR Manager}}} (Go, GitHub APIs, GitHub Actions) --- CLI tool automating end-to-end PR workflows: reviewer assignment, merge queuing, status checks, and cross-platform binary releases via \\textbf{GitHub Actions CI/CD}.}",
-        "\\resumeItem{\\textbf{\\extlink{https://github.com/mayurathavale18/terminal-portfolio}{\\underline{Terminal Portfolio}}} (Go, BubbleTea, Wish, Lipgloss, AWS EC2) --- SSH-accessible TUI at \\texttt{ssh portfolio.mayurathavale.com} with multi-tab navigation, SQLite visitor analytics, and live presence tracking. Deployed on \\textbf{AWS EC2} with \\textbf{GitHub Actions} hot-deploying via SCP and systemd.}",
+        "\\resumeItem{\\textbf{\\extlink{https://github.com/mayurathavale18/terminal-portfolio}{\\underline{Terminal Portfolio}}} (Go, BubbleTea, Wish, Lipgloss) --- SSH-accessible TUI at \\texttt{ssh portfolio.mayurathavale.com} with multi-tab navigation, SQLite visitor analytics, and live presence tracking; self-hosted on k3s.}",
         "\\resumeItem{\\textbf{Technical Writing} --- Published articles on system security, cloud infrastructure, and networking on \\extlink{https://mayatdev1569.medium.com/}{\\underline{Medium}}, including self-hosted VPN tunneling on AWS.}",
     ]
-
-    # Reorder / tweak based on focus
-    if "ai_llm" in focus or "data" in focus:
-        projects[0] = "\\resumeItem{\\textbf{zo-ai Conversation Threader} (Python, OpenSearch, Spark, S3 Tables) --- Built the OpenSearch-backed dataset backbone for a copilot service: clustered non-contiguous WhatsApp messages into chronological threads using temporal proximity and semantic similarity, classified each thread into query types, and indexed semantic embeddings for hybrid search retrieval of actionable items.}"
-    if "observability" in focus or "backend" in focus:
-        # Keep default
-        pass
 
     return "\n\\vspace{6pt}\n\n".join(projects)
 
@@ -1185,36 +1177,19 @@ def build_resume_fields(job, jd_data, tight=False):
 
     skills_section, skill_order = build_skills_section(focus, jd_keywords)
     if tight and len(skill_order) > 6:
-        # Reduce to 6 categories: drop Frontend usually
-        keep = [c for c in skill_order if c != "Frontend"][:6]
-        # Rebuild
-        categories = {
-            "Languages": "Go, Python, TypeScript, JavaScript, SQL, Bash",
-            "Backend": "REST APIs, Microservices, FastAPI, NestJS, Node.js, API Gateways, KrakenD, Event-driven Architecture, SQS, SNS, DynamoDB Streams, Temporal Workflows",
-            "Databases": "PostgreSQL, MySQL, Redis, DynamoDB, OpenSearch, MongoDB",
-            "Infrastructure": "AWS, ECS, EC2, RDS, SQS, SNS, DynamoDB, Lambda, Secrets Manager, CloudWatch, Terraform, Docker, Kubernetes, GitHub Actions",
-            "AI/LLM": "LangGraph, LangChain, RAG Pipelines, OpenSearch, KNN, BM25, Multi-Agent Orchestration",
-            "Frontend": "React, Next.js 14, TypeScript, GraphQL, tRPC",
-            "Concepts": "System Design, Distributed Systems, Concurrency, Multi-Tenant Architecture, Secure Coding, SOLID, Resiliency Patterns",
-        }
-        jd_text_lower = ", ".join(jd_keywords).lower()
-        if "java" in jd_text_lower:
-            categories["Languages"] = "Go, Python, TypeScript, JavaScript, Java, SQL, Bash"
-        if "spark" in jd_text_lower:
-            categories["Databases"] = "PostgreSQL, MySQL, Redis, DynamoDB, OpenSearch, MongoDB, Spark, S3 Tables"
-        if "observability" in jd_text_lower or "monitoring" in jd_text_lower:
-            categories["Infrastructure"] = "AWS, ECS, EC2, RDS, SQS, SNS, DynamoDB, Lambda, Secrets Manager, CloudWatch, Terraform, Docker, Kubernetes, GitHub Actions, CloudWatch Metrics, Structured Logging"
-        skills_lines = [f"\\techSkill{{{cat}}}{{{categories[cat]}}}" for cat in keep]
-        skills_section = "\n".join(skills_lines)
+        # Reduce to 6 categories: drop Frontend unless it's a full-stack role
+        drop = "Concepts" if "full_stack" in focus else "Frontend"
+        keep = [c for c in skill_order if c != drop][:6]
+        categories = _skill_categories(jd_keywords)
+        skills_section = "\n".join(
+            f"\\techSkill{{{cat}}}{{{_jd_first_order(categories[cat], jd_keywords)}}}" for cat in keep)
 
     bullets = build_experience_bullets(focus, jd_keywords, tight=tight)
     projects = build_projects_section(focus, jd_keywords)
 
-    # Close truthful coverage gaps: inject up to MAX_INJECTED_KEYWORDS
-    # missing-but-truthful JD keywords into the top bullet, and put any
-    # overflow on an "Additional Relevant Skills" line -- skipped in tight
-    # mode, since one page takes priority over closing the last few points
-    # of coverage (see inject_keyword_emphasis's docstring).
+    # Close truthful coverage gaps on extra skills lines ("Also" for
+    # direct-tier, "Familiarity with" for hedged-tier) -- skipped in tight
+    # mode, since one page takes priority over the last few coverage points.
     bullets, extra_skills_line = inject_keyword_emphasis(bullets, skills_section, jd_keywords)
     if extra_skills_line and not tight:
         skills_section = skills_section + "\n" + extra_skills_line

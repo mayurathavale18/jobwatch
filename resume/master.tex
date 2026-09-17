@@ -71,22 +71,25 @@ Hyderabad, Telangana, India \hspace{6pt} \textbullet\ +91 7972833243 \hspace{6pt
 
 % ---------- SKILLS ----------
 \section{Technical Skills}
-\techSkill{Languages}{Go, Python, TypeScript, JavaScript, SQL, Bash}
 % Sub-technologies flattened into the top-level comma list rather than
 % nested in parens -- ATS skill-taggers that split on top-level commas only
 % were reading "AWS (ECS, EC2, RDS, ...)" as one long unmatched string
 % instead of recognizing ECS/EC2/RDS/Lambda etc. as individual keywords.
-\techSkill{Backend}{REST APIs, Microservices, FastAPI, NestJS, Node.js, API Gateways, KrakenD, Event-driven Architecture, SQS, SNS, DynamoDB Streams, Temporal Workflows}
-\techSkill{Databases}{PostgreSQL, MySQL, Redis, DynamoDB, OpenSearch, MongoDB}
-\techSkill{Infrastructure}{AWS, ECS, EC2, RDS, SQS, SNS, DynamoDB, Lambda, Secrets Manager, CloudWatch, Terraform, Docker, Kubernetes, GitHub Actions}
-\techSkill{AI/LLM}{LangGraph, LangChain, RAG Pipelines, OpenSearch, KNN, BM25, Multi-Agent Orchestration}
-\techSkill{Frontend}{React, Next.js 14, TypeScript, GraphQL, tRPC}
-\techSkill{Concepts}{System Design, Distributed Systems, Concurrency, Multi-Tenant Architecture, Secure Coding, SOLID, Resiliency Patterns}
+% Keep in sync with BASE_SKILLS in scripts/tailor_resume.py.
+\techSkill{Languages}{Go, Python, TypeScript, JavaScript, SQL, Bash}
+\techSkill{AI/LLM}{LangGraph, LangChain, RAG, Hybrid Search, KNN, BM25, Multi-Agent Orchestration, LiteLLM, MCP, Azure AI Foundry, SSE Streaming}
+\techSkill{Backend}{REST APIs, Microservices, FastAPI, Gin, NestJS, Node.js, KrakenD, GraphQL, Hasura, Temporal, Event-driven Architecture, Webhooks}
+\techSkill{Data}{PostgreSQL, Aurora MySQL, Redis, Valkey, DynamoDB, OpenSearch, MongoDB, Spark, S3 Tables, SQS, SNS, DynamoDB Streams, EventBridge}
+\techSkill{Infrastructure}{AWS, ECS Fargate, EC2, RDS, Lambda, CloudFront, Secrets Manager, CloudWatch, Terraform, Docker, Kubernetes, GitHub Actions}
+\techSkill{Frontend}{React, Next.js, Vite, NX, Module Federation, React Native, PWA}
+\techSkill{Concepts}{System Design, Distributed Systems, Concurrency, Multi-Tenant Architecture, Idempotency, Observability, Resiliency Patterns}
 
 % ---------- EXPERIENCE ----------
 \vspace{4pt plus 1fill}
 \section{Experience}
-\begin{itemize}[leftmargin=0pt]
+% label={} -- \resumeSubheading emits a bare \item, which otherwise renders
+% a stray floating bullet glyph next to the role/school name.
+\begin{itemize}[leftmargin=0pt, label={}]
 \resumeSubheading
 {Software Development Engineer}{Jan 2025 -- Present}
 {Zotok.ai}{Hyderabad, India}
@@ -94,19 +97,19 @@ Hyderabad, Telangana, India \hspace{6pt} \textbullet\ +91 7972833243 \hspace{6pt
 \vspace*{6pt}
 \resumeItemListStart
 
-\resumeItem{Built and owned a \textbf{Go-based API gateway} routing traffic across \textbf{12 microservices} --- implemented auth middleware, rate limiting, and request routing with full KrakenD configuration; applied concurrency patterns to handle high-throughput routing safely.}
+\resumeItem{Architected and shipped an \textbf{agentic AI copilot} (FastAPI, LangGraph multi-agent orchestration) from POC to production, serving \textbf{5k+ DAU} and \textbf{100k+ conversations/day}; drove a \textbf{200\%+} increase in daily sales leads.}
 
-\resumeItem{Designed \textbf{event-driven automation pipelines} using SQS, SNS, DynamoDB Streams, and webhooks; modelled data flows for reliability, idempotency, and explicit failure-mode handling across async consumers.}
+\resumeItem{Built \textbf{hybrid-retrieval RAG} over OpenSearch (KNN vectors + BM25) with Redis + PostgreSQL storage, and \textbf{4 streaming strategies} (SSE, AG-UI, LangGraph multi-mode) that drive agent-generated UI components.}
 
-\resumeItem{Designed \textbf{Temporal workflows with customized templates} to orchestrate agent-driven business processes; built APIs to deploy agents with \textbf{customized guidance prompts}, enabling tenant-specific behavior.}
+\resumeItem{Self-hosted a \textbf{LiteLLM proxy} governing every model call on the platform: \textbf{100M tokens/day} across 5 services, with per-source token tracking and plan-based budget enforcement.}
 
-\resumeItem{Extracted structured requirements from user \textbf{WhatsApp messages} and synced them into attached \textbf{Google Sheets}; triggered webhook events on manual cell updates to send templated WhatsApp messages or execute custom business logic.}
+\resumeItem{Wrote a \textbf{Go (Gin + KrakenD) API gateway} fronting \textbf{12 microservices}: auth middleware, rate limiting, and routing at \textbf{1k RPS} steady / \textbf{10k RPS} under load with \textbf{100ms P95} latency.}
 
-\resumeItem{Owned \textbf{AWS infrastructure via Terraform} (ECS Fargate, RDS, SQS, SNS, DynamoDB, Secrets Manager, Elasticache/Valkey); maintained GitHub Actions CI/CD with automated integration tests, cutting release cycles by \textbf{35\%}.}
+\resumeItem{Built the conversation \textbf{ingestion pipeline} (Spark, S3 Tables, OpenSearch): threads and classifies \textbf{10k+ messages} per 20-minute window into a \textbf{10M+ document} embedding index at 1--2s latency per window.}
 
-\resumeItem{Built a \textbf{RAG pipeline} with OpenSearch KNN + BM25 hybrid retrieval, Redis + PostgreSQL (RDS) dual-layer storage, and CloudWatch metrics and structured logging for observability.}
+\resumeItem{Built \textbf{Temporal}-scheduled extraction agents monitoring \textbf{20+} client WhatsApp groups (72 runs/day, 1k+ messages per tenant) into Google Sheets via tenant-specific guidance prompts; migrated the service from Python to TypeScript.}
 
-\resumeItem{Architected an \textbf{agentic AI copilot} (FastAPI + LangGraph) that increased daily sales leads by \textbf{200\%+}; implemented 4 streaming strategies (SSE, AG-UI, LangGraph multi-mode).}
+\resumeItem{Owned \textbf{AWS infrastructure for 5 production services} via Terraform (ECS Fargate, RDS, Aurora, DynamoDB, ElastiCache, Lambda, CloudFront); GitHub Actions CI/CD with integration-test gates cut release cycles by \textbf{35\%}.}
 
 \resumeItemListEnd
 \end{itemize}
@@ -119,13 +122,13 @@ Hyderabad, Telangana, India \hspace{6pt} \textbullet\ +91 7972833243 \hspace{6pt
 \resumeItem{\textbf{CollateralFi} (Solana, Rust, Anchor, Python, LangGraph, FastAPI, Pyth Oracle) --- Designing and building an AI-agent-orchestrated DeFi lending protocol on Solana: an Anchor/Rust on-chain program for collateral-backed borrowing and liquidation, with a \textbf{LangGraph risk agent} computing dynamic loan-to-value ratios from live price-oracle feeds and an on-chain payment layer for loan settlement.}
 \vspace{6pt}
 
-\resumeItem{\textbf{zo-ai Conversation Threader} (Python, OpenSearch, LangGraph, FastAPI) --- Built the OpenSearch-backed dataset backbone for a copilot service: clustered non-contiguous WhatsApp messages into chronological threads using temporal proximity and semantic similarity, classified each thread into query types (custom, fixed, or LLM-discovered), and indexed semantic embeddings (titleVector, descriptionVector, queryTypeVector) for hybrid search retrieval of actionable items.}
+\resumeItem{\textbf{jobwatch} (Go, Python, React, SQLite, k3s) --- Personal AI job-search agent: polls 50+ company ATS boards and job aggregators, scores each role with an LLM against a preference profile, generates a JD-tailored one-page LaTeX resume under a truth-lock (no unverified claims), and drafts Gmail outreach; self-hosted on k3s with GitHub Actions CD.}
 \vspace{6pt}
 
 \resumeItem{\textbf{\extlink{https://github.com/mayurathavale18/pr-manager}{\underline{PR Manager}}} (Go, GitHub APIs, GitHub Actions) --- CLI tool automating end-to-end PR workflows: reviewer assignment, merge queuing, status checks, and cross-platform binary releases via \textbf{GitHub Actions CI/CD}.}
 \vspace{6pt}
 
-\resumeItem{\textbf{\extlink{https://github.com/mayurathavale18/terminal-portfolio}{\underline{Terminal Portfolio}}} (Go, BubbleTea, Wish, Lipgloss, AWS EC2) --- SSH-accessible TUI at \texttt{ssh portfolio.mayurathavale.com} with multi-tab navigation, SQLite visitor analytics, and live presence tracking. Deployed on \textbf{AWS EC2} with \textbf{GitHub Actions} hot-deploying via SCP and systemd.}
+\resumeItem{\textbf{\extlink{https://github.com/mayurathavale18/terminal-portfolio}{\underline{Terminal Portfolio}}} (Go, BubbleTea, Wish, Lipgloss) --- SSH-accessible TUI at \texttt{ssh portfolio.mayurathavale.com} with multi-tab navigation, SQLite visitor analytics, and live presence tracking; self-hosted on k3s.}
 \vspace{6pt}
 
 \resumeItem{\textbf{Technical Writing} --- Published articles on system security, cloud infrastructure, and networking on \extlink{https://mayatdev1569.medium.com/}{\underline{Medium}}, including self-hosted VPN tunneling on AWS.}
@@ -139,7 +142,7 @@ Hyderabad, Telangana, India \hspace{6pt} \textbullet\ +91 7972833243 \hspace{6pt
 % instead of \vfill dumping all slack into this one gap.
 \vspace{4pt plus 1fill}
 \section{Education}
-\begin{itemize}[leftmargin=0pt]
+\begin{itemize}[leftmargin=0pt, label={}]
 % Comma added -- "College of Engineering, Pune" is the institute's actual
 % official name; without it, some ATS institution-lookup matching was
 % truncating to the generic "College of Engineering" (a name shared by many
