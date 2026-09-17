@@ -96,6 +96,6 @@ telegram:
   chat_id_env: "JOBWATCH_TG_CHAT"
 
 dashboard:
-  addr: "127.0.0.1:8787"
+  addr: "0.0.0.0:8787"
 
 db_path: "./jobwatch.db"
