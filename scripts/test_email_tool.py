@@ -37,3 +37,12 @@ def test_main_rejects_unknown_action(monkeypatch, capsys):
 
 def test_send_requires_draft_id():
     assert et.send({"job_id": 1, "draft_id": ""})["ok"] is False
+
+
+def test_main_keeps_log_noise_off_stdout(monkeypatch, capsys):
+    monkeypatch.setitem(et.ACTIONS, "noisy", lambda req: (et.tr.log("WARN: chatter"), {"ok": True})[1])
+    monkeypatch.setattr("sys.stdin", io.StringIO('{"action": "noisy"}'))
+    et.main()
+    captured = capsys.readouterr()
+    assert json.loads(captured.out) == {"ok": True}
+    assert "chatter" in captured.err

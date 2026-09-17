@@ -185,6 +185,34 @@ def test_call_opencode_returns_content_on_success(monkeypatch):
     assert result == "hello from the model"
 
 
+def test_call_opencode_falls_back_to_next_model(monkeypatch):
+    monkeypatch.setattr(tr, "OPENCODE_API_KEY", "fake-key")
+    tried = []
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def read(self):
+            return json.dumps({"choices": [{"message": {"content": "from fallback"}}]}).encode()
+
+    def fake_urlopen(req, timeout=20):
+        model = json.loads(req.data)["model"]
+        tried.append(model)
+        assert req.get_header("X-opencode-session")
+        if model == "primary":
+            raise OSError("403 RegionError")
+        return FakeResponse()
+
+    monkeypatch.setattr(tr, "OPENCODE_FALLBACK_MODELS", ["backup"])
+    monkeypatch.setattr(tr, "urlopen", fake_urlopen)
+    assert tr.call_opencode("s", "u", model="primary") == "from fallback"
+    assert tried == ["primary", "backup"]
+
+
 def test_call_opencode_returns_none_on_http_error(monkeypatch):
     monkeypatch.setattr(tr, "OPENCODE_API_KEY", "fake-key")
     def raise_error(*args, **kwargs):
