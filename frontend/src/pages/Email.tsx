@@ -84,7 +84,7 @@ export default function Email({ jobId }: { jobId: number }) {
     })
   }
 
-  function useReferral(c: Connection) {
+  function applyReferral(c: Connection) {
     setTo(c.email)
     setToName(`${c.firstName} ${c.lastName}`.trim())
     setInstruction(
@@ -131,7 +131,7 @@ export default function Email({ jobId }: { jobId: number }) {
                   {c.position} @ {c.company}
                   {c.email ? ` · ${c.email}` : ' · no email shared — message on LinkedIn'}
                 </span>{' '}
-                <button type="button" disabled={disabled} onClick={() => useReferral(c)}>
+                <button type="button" disabled={disabled} onClick={() => applyReferral(c)}>
                   Draft referral ask
                 </button>
               </li>

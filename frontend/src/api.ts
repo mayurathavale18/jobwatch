@@ -153,6 +153,23 @@ export async function fetchCronStatuses(): Promise<CronJobStatus[]> {
   return res.json()
 }
 
+export interface QueueEvent {
+  id: number
+  kind: string
+  payload: string
+  status: 'pending' | 'running' | 'done' | 'failed'
+  attempts: number
+  error: string
+  createdAt: string
+  updatedAt: string
+}
+
+export async function fetchEvents(): Promise<QueueEvent[]> {
+  const res = await fetch('/api/events')
+  if (!res.ok) throw new Error(`GET /api/events: ${res.status}`)
+  return (await res.json()) ?? []
+}
+
 export async function triggerCronJob(name: string): Promise<void> {
   const res = await fetch(`/api/cron/${name}/run`, { method: 'POST' })
   if (!res.ok) throw new Error(`POST /api/cron/${name}/run: ${res.status}`)

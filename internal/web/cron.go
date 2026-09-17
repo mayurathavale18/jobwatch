@@ -21,11 +21,16 @@ type cronJob struct {
 
 var cronJobDefs = []cronJob{
 	{"poll", "every 15 min", 15 * time.Minute, "scripts/poll-wrapper.sh"},
-	{"tg-sync", "every 5 min, 07:00–24:00 IST", 5 * time.Minute, "scripts/tg-sync-wrapper.sh"},
 	{"tailor-resume", "every 30 min", 30 * time.Minute, "scripts/tailor-resume-wrapper.sh"},
-	{"dashboard-watchdog", "every 10 min", 10 * time.Minute, "scripts/dashboard-watchdog.sh"},
 	{"daily-summary", "23:50 IST daily", 24 * time.Hour, "scripts/daily-summary.sh"},
 	{"weekly-backup", "Sunday 02:00 IST", 7 * 24 * time.Hour, "scripts/weekly-backup.sh"},
+}
+
+// CronScript returns the wrapper script for a named cron job, for the event
+// worker's cron_run handler.
+func CronScript(name string) (string, bool) {
+	j, ok := findCronJob(name)
+	return j.Script, ok
 }
 
 func findCronJob(name string) (cronJob, bool) {

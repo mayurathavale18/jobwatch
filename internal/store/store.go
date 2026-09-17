@@ -59,6 +59,13 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("enabling foreign keys: %w", err)
 	}
+	// Several processes share this file (dashboard, worker, cron pods,
+	// Python scripts). Without a busy timeout, a write that hits another
+	// process's lock fails immediately with SQLITE_BUSY instead of waiting.
+	if _, err := db.Exec(`PRAGMA busy_timeout=10000;`); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("setting busy timeout: %w", err)
+	}
 
 	s := &Store{db: db}
 	if err := s.migrate(); err != nil {
@@ -115,6 +122,18 @@ CREATE TABLE IF NOT EXISTS kv (
 	key TEXT PRIMARY KEY,
 	value TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS events (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	kind TEXT NOT NULL,
+	payload TEXT NOT NULL,
+	status TEXT NOT NULL DEFAULT 'pending',
+	attempts INTEGER NOT NULL DEFAULT 0,
+	error TEXT NOT NULL DEFAULT '',
+	created_at TEXT NOT NULL,
+	updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_events_status ON events(status, id);
 
 CREATE TABLE IF NOT EXISTS connections (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,

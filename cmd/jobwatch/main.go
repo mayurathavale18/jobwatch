@@ -3,17 +3,25 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
 	"jobwatch/internal/config"
+	"jobwatch/internal/eventq"
 	"jobwatch/internal/notify"
 	"jobwatch/internal/poller"
 	"jobwatch/internal/providers"
@@ -47,6 +55,8 @@ func main() {
 		err = runTgSync(args)
 	case "refilter":
 		err = runRefilter(args)
+	case "worker":
+		err = runWorker(args)
 	case "-h", "--help", "help":
 		usage()
 		return
@@ -70,7 +80,8 @@ Usage:
   jobwatch backfill    [-config config.yaml]   poll and store everything as seen, without notifying
   jobwatch serve       [-config config.yaml]   run the dashboard web server
   jobwatch test-notify [-config config.yaml]   send a test Telegram message and exit
-  jobwatch tg-sync     [-config config.yaml]   drain Telegram replies and apply status/notes changes, then exit
+  jobwatch worker      [-config config.yaml]   long-poll Telegram and run queued events (replies + dashboard actions) until stopped
+  jobwatch tg-sync     [-config config.yaml]   one-shot Telegram drain for local dev; never run while a worker is running
   jobwatch refilter    [-config config.yaml]   re-apply current filters to status=new jobs, marking failures ignored`)
 }
 
@@ -250,5 +261,137 @@ func runTgSync(args []string) error {
 		"status_changes", result.StatusChanges,
 		"errors", result.Errors,
 	)
+	return nil
+}
+
+// runWorker is the long-lived background process: it long-polls Telegram
+// (replies land in about a second instead of on a 5-minute cron) and runs
+// every queued event -- those Telegram updates plus dashboard-triggered
+// tailor-one / outreach / cron run-now actions. It is the bot's only
+// getUpdates consumer, so exactly one worker may run per bot.
+func runWorker(args []string) error {
+	fs := flag.NewFlagSet("worker", flag.ExitOnError)
+	fixScript := fs.String("fix-script", "scripts/resume-fix.sh", "script run for a \"fix\"/\"update\" reply")
+	outreachScript := fs.String("outreach-script", "scripts/outreach-one.sh", "script run for an \"outreach\" reply or dashboard outreach")
+	tailorOneScript := fs.String("tailor-one-script", "scripts/tailor-one.sh", "script run for a dashboard manual job submit")
+	logsDir := fs.String("logs-dir", "logs", "directory for cron.log (script output)")
+	concurrency := fs.Int("concurrency", 4, "events processed at once")
+	cfg, err := loadConfigFlag(fs, args)
+	if err != nil {
+		return err
+	}
+
+	st, err := store.Open(cfg.DBPath)
+	if err != nil {
+		return fmt.Errorf("opening store: %w", err)
+	}
+	defer st.Close()
+
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+
+	runScript := func(ctx context.Context, script string, scriptArgs ...string) error {
+		return runLoggedScript(ctx, *logsDir, script, scriptArgs...)
+	}
+
+	w := &eventq.Worker{
+		Store:        st,
+		Concurrency:  *concurrency,
+		PollInterval: 2 * time.Second,
+		MaxAttempts:  3,
+		Handlers: map[string]eventq.Handler{
+			store.EventTailorOne: func(ctx context.Context, payload string) error {
+				var p struct {
+					JobID int64 `json:"job_id"`
+				}
+				if err := json.Unmarshal([]byte(payload), &p); err != nil {
+					return err
+				}
+				return runScript(ctx, *tailorOneScript, strconv.FormatInt(p.JobID, 10))
+			},
+			store.EventOutreach: func(ctx context.Context, payload string) error {
+				var p struct {
+					JobID        int64  `json:"job_id"`
+					FounderEmail string `json:"founder_email"`
+				}
+				if err := json.Unmarshal([]byte(payload), &p); err != nil {
+					return err
+				}
+				a := []string{strconv.FormatInt(p.JobID, 10)}
+				if p.FounderEmail != "" {
+					a = append(a, p.FounderEmail)
+				}
+				return runScript(ctx, *outreachScript, a...)
+			},
+			store.EventCronRun: func(ctx context.Context, payload string) error {
+				var p struct {
+					Name string `json:"name"`
+				}
+				if err := json.Unmarshal([]byte(payload), &p); err != nil {
+					return err
+				}
+				script, ok := web.CronScript(p.Name)
+				if !ok {
+					return fmt.Errorf("unknown cron job %q", p.Name)
+				}
+				return runScript(ctx, script)
+			},
+		},
+	}
+
+	tg, tgErr := notify.New(cfg.BotToken(), cfg.ChatID())
+	chatID, idErr := strconv.ParseInt(cfg.ChatID(), 10, 64)
+	if tgErr != nil || idErr != nil {
+		// Still useful without Telegram: dashboard-queued events run.
+		slog.Warn("worker: telegram not configured, listener disabled", "error", errors.Join(tgErr, idErr))
+		return w.Run(ctx)
+	}
+	tg.LongPollSeconds = 50
+	tg.Client = &http.Client{Timeout: 70 * time.Second}
+
+	syncer := tgsync.New(st, tg, chatID, *fixScript, *outreachScript)
+	w.Handlers[store.EventTelegramUpdate] = syncer.HandleEvent
+
+	listenErr := make(chan error, 1)
+	go func() {
+		listenErr <- syncer.Listen(ctx, w.Wake)
+	}()
+
+	slog.Info("worker started", "concurrency", *concurrency)
+	if err := w.Run(ctx); err != nil {
+		return err
+	}
+	return <-listenErr
+}
+
+// runLoggedScript runs a wrapper script, appending its output to
+// logs/cron.log (same place the old detached dashboard spawns logged), and
+// returns an error carrying the output's last line on failure.
+// ponytail: 20-minute cap covers tailor-one's 5-minute lock wait plus a run;
+// weekly-backup has no cap of its own, raise this if it ever gets killed.
+func runLoggedScript(ctx context.Context, logsDir, script string, args ...string) error {
+	ctx, cancel := context.WithTimeout(ctx, 20*time.Minute)
+	defer cancel()
+
+	var out bytes.Buffer
+	cmd := exec.CommandContext(ctx, "bash", append([]string{script}, args...)...)
+	cmd.Stdout = &out
+	cmd.Stderr = &out
+	runErr := cmd.Run()
+
+	if err := os.MkdirAll(logsDir, 0o755); err == nil {
+		if f, err := os.OpenFile(filepath.Join(logsDir, "cron.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644); err == nil {
+			_, _ = f.Write(out.Bytes())
+			_ = f.Close()
+		}
+	}
+
+	if runErr != nil {
+		last := strings.TrimSpace(out.String())
+		if i := strings.LastIndexByte(last, '\n'); i >= 0 {
+			last = last[i+1:]
+		}
+		return fmt.Errorf("%s: %w: %s", filepath.Base(script), runErr, last)
+	}
 	return nil
 }
