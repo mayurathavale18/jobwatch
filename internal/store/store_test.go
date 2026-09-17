@@ -488,3 +488,29 @@ func TestJobRowHasOutreachFieldsDefaultingEmpty(t *testing.T) {
 		t.Errorf("ListJobs rows = %+v, want one row with empty OutreachStatus", rows)
 	}
 }
+
+func TestMatchConnections(t *testing.T) {
+	st := newTestStore(t)
+	ctx := context.Background()
+	err := st.ReplaceConnections(ctx, []Connection{
+		{FirstName: "A", Company: "Google"},
+		{FirstName: "B", Company: "Stripe India"},
+		{FirstName: "C", Company: ""},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for company, want := range map[string]int{"Google India": 1, "Stripe": 1, "Acme": 0, "": 0} {
+		got, err := st.MatchConnections(ctx, company)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got) != want {
+			t.Errorf("MatchConnections(%q) = %d, want %d", company, len(got), want)
+		}
+	}
+	n, _ := st.CountConnections(ctx)
+	if n != 3 {
+		t.Errorf("CountConnections = %d, want 3", n)
+	}
+}

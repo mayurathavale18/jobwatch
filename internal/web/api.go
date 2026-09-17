@@ -33,6 +33,9 @@ type apiJob struct {
 	OutreachDraftedAt string `json:"outreachDraftedAt"`
 	FitScore          *int64 `json:"fitScore"`
 	WorkMode          string `json:"workMode"`
+	EmailDraftID      string `json:"emailDraftId"`
+	EmailTo           string `json:"emailTo"`
+	EmailSentAt       string `json:"emailSentAt"`
 }
 
 func toAPIJob(j store.JobRow) apiJob {
@@ -52,6 +55,9 @@ func toAPIJob(j store.JobRow) apiJob {
 		FounderEmail:      j.FounderEmail,
 		OutreachDraftedAt: j.OutreachDraftedAt,
 		WorkMode:          j.WorkMode,
+		EmailDraftID:      j.EmailDraftID,
+		EmailTo:           j.EmailTo,
+		EmailSentAt:       j.EmailSentAt,
 	}
 	if j.FitScore.Valid {
 		out.FitScore = &j.FitScore.Int64
