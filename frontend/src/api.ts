@@ -15,6 +15,73 @@ export interface Job {
   outreachDraftedAt: string
   fitScore: number | null
   workMode: string
+  emailDraftId: string
+  emailTo: string
+  emailSentAt: string
+}
+
+export interface Connection {
+  firstName: string
+  lastName: string
+  email: string
+  company: string
+  position: string
+  linkedinUrl: string
+}
+
+export async function fetchJob(id: number): Promise<Job> {
+  const res = await fetch(`/api/jobs/${id}`)
+  if (!res.ok) throw new Error(`GET /api/jobs/${id}: ${res.status}`)
+  return res.json()
+}
+
+export async function fetchReferrals(id: number): Promise<Connection[]> {
+  const res = await fetch(`/api/jobs/${id}/referrals`)
+  if (!res.ok) throw new Error(`GET /api/jobs/${id}/referrals: ${res.status}`)
+  const data = await res.json()
+  return data.referrals ?? []
+}
+
+export async function fetchConnectionsCount(): Promise<number> {
+  const res = await fetch('/api/connections')
+  if (!res.ok) throw new Error(`GET /api/connections: ${res.status}`)
+  return (await res.json()).count
+}
+
+export async function uploadConnections(csv: string): Promise<number> {
+  const res = await fetch('/api/connections', { method: 'POST', body: csv })
+  if (!res.ok) throw new Error(await res.text())
+  return (await res.json()).imported
+}
+
+export interface EmailActionRequest {
+  action: 'generate' | 'revise' | 'save_draft' | 'send'
+  to?: string
+  toName?: string
+  subject?: string
+  body?: string
+  instruction?: string
+  draftId?: string
+}
+
+export interface EmailActionResponse {
+  ok: boolean
+  error?: string
+  subject?: string
+  body?: string
+  draft_id?: string
+  link?: string
+  attached_resume?: boolean
+}
+
+export async function emailAction(jobId: number, req: EmailActionRequest): Promise<EmailActionResponse> {
+  const res = await fetch(`/api/jobs/${jobId}/email`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  })
+  if (!res.ok) throw new Error(`POST /api/jobs/${jobId}/email: ${res.status} ${await res.text()}`)
+  return res.json()
 }
 
 export interface PollRun {

@@ -115,6 +115,17 @@ CREATE TABLE IF NOT EXISTS kv (
 	key TEXT PRIMARY KEY,
 	value TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS connections (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	first_name TEXT NOT NULL DEFAULT '',
+	last_name TEXT NOT NULL DEFAULT '',
+	email TEXT NOT NULL DEFAULT '',
+	company TEXT NOT NULL DEFAULT '',
+	position TEXT NOT NULL DEFAULT '',
+	linkedin_url TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_connections_company ON connections(company);
 `
 	if _, err := s.db.Exec(schema); err != nil {
 		return err
@@ -129,7 +140,78 @@ CREATE TABLE IF NOT EXISTS kv (
 	_, _ = s.db.Exec(`ALTER TABLE jobs ADD COLUMN outreach_drafted_at TEXT NOT NULL DEFAULT ''`)
 	_, _ = s.db.Exec(`ALTER TABLE jobs ADD COLUMN fit_score INTEGER`)
 	_, _ = s.db.Exec(`ALTER TABLE jobs ADD COLUMN work_mode TEXT NOT NULL DEFAULT ''`)
+	_, _ = s.db.Exec(`ALTER TABLE jobs ADD COLUMN email_draft_id TEXT NOT NULL DEFAULT ''`)
+	_, _ = s.db.Exec(`ALTER TABLE jobs ADD COLUMN email_to TEXT NOT NULL DEFAULT ''`)
+	_, _ = s.db.Exec(`ALTER TABLE jobs ADD COLUMN email_sent_at TEXT NOT NULL DEFAULT ''`)
 	return nil
+}
+
+// Connection is one imported LinkedIn connection (from the "Connections"
+// section of a LinkedIn data export CSV).
+type Connection struct {
+	FirstName   string
+	LastName    string
+	Email       string
+	Company     string
+	Position    string
+	LinkedInURL string
+}
+
+// ReplaceConnections wipes and reloads the connections table -- imports
+// are idempotent full-file uploads, not increments.
+func (s *Store) ReplaceConnections(ctx context.Context, conns []Connection) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM connections`); err != nil {
+		return err
+	}
+	for _, c := range conns {
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO connections (first_name, last_name, email, company, position, linkedin_url) VALUES (?, ?, ?, ?, ?, ?)`,
+			c.FirstName, c.LastName, c.Email, c.Company, c.Position, c.LinkedInURL); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// CountConnections returns how many connections are imported.
+func (s *Store) CountConnections(ctx context.Context) (int, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM connections`).Scan(&n)
+	return n, err
+}
+
+// MatchConnections returns connections whose company matches the given
+// company name in either containment direction ("Google" connection vs
+// "Google India" job and vice versa), case-insensitively.
+// ponytail: naive substring match; upgrade to normalized company aliases
+// if false positives ever annoy.
+func (s *Store) MatchConnections(ctx context.Context, companyName string) ([]Connection, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT first_name, last_name, email, company, position, linkedin_url
+		FROM connections
+		WHERE company != '' AND ? != ''
+		  AND (instr(lower(company), lower(?)) > 0 OR instr(lower(?), lower(company)) > 0)
+		ORDER BY company, last_name`,
+		companyName, companyName, companyName)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []Connection
+	for rows.Next() {
+		var c Connection
+		if err := rows.Scan(&c.FirstName, &c.LastName, &c.Email, &c.Company, &c.Position, &c.LinkedInURL); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
 }
 
 // Exists reports whether a job with the given dedupe key is already stored.
@@ -286,6 +368,9 @@ type JobRow struct {
 	OutreachDraftedAt         string
 	FitScore                  sql.NullInt64
 	WorkMode                  string
+	EmailDraftID              string
+	EmailTo                   string
+	EmailSentAt               string
 }
 
 // JobFilter narrows ListJobs results.
@@ -334,7 +419,7 @@ func filterWhere(f JobFilter) (string, []any) {
 
 func (s *Store) ListJobs(ctx context.Context, f JobFilter) ([]JobRow, error) {
 	where, args := filterWhere(f)
-	query := `SELECT id, provider, company_slug, company_name, external_id, title, location, url, posted_at, first_seen_at, status, notes, manual_jd_text, manual_outreach_instruction, outreach_status, founder_name, founder_email, outreach_drafted_at, fit_score, work_mode FROM jobs` + where
+	query := `SELECT id, provider, company_slug, company_name, external_id, title, location, url, posted_at, first_seen_at, status, notes, manual_jd_text, manual_outreach_instruction, outreach_status, founder_name, founder_email, outreach_drafted_at, fit_score, work_mode, email_draft_id, email_to, email_sent_at FROM jobs` + where
 	query += ` ORDER BY first_seen_at DESC, id DESC`
 	if f.Limit > 0 {
 		query += ` LIMIT ? OFFSET ?`
@@ -352,7 +437,8 @@ func (s *Store) ListJobs(ctx context.Context, f JobFilter) ([]JobRow, error) {
 		var j JobRow
 		if err := rows.Scan(&j.ID, &j.Provider, &j.CompanySlug, &j.CompanyName, &j.ExternalID,
 			&j.Title, &j.Location, &j.URL, &j.PostedAt, &j.FirstSeenAt, &j.Status, &j.Notes, &j.ManualJDText, &j.ManualOutreachInstruction,
-			&j.OutreachStatus, &j.FounderName, &j.FounderEmail, &j.OutreachDraftedAt, &j.FitScore, &j.WorkMode); err != nil {
+			&j.OutreachStatus, &j.FounderName, &j.FounderEmail, &j.OutreachDraftedAt, &j.FitScore, &j.WorkMode,
+			&j.EmailDraftID, &j.EmailTo, &j.EmailSentAt); err != nil {
 			return nil, err
 		}
 		out = append(out, j)
@@ -389,11 +475,12 @@ func (s *Store) GetJobTx(ctx context.Context, tx *sql.Tx, id int64) (JobRow, err
 func getJobQuerier(ctx context.Context, q querier, id int64) (JobRow, error) {
 	var j JobRow
 	err := q.QueryRowContext(ctx,
-		`SELECT id, provider, company_slug, company_name, external_id, title, location, url, posted_at, first_seen_at, status, notes, manual_jd_text, manual_outreach_instruction, outreach_status, founder_name, founder_email, outreach_drafted_at, fit_score, work_mode FROM jobs WHERE id = ?`,
+		`SELECT id, provider, company_slug, company_name, external_id, title, location, url, posted_at, first_seen_at, status, notes, manual_jd_text, manual_outreach_instruction, outreach_status, founder_name, founder_email, outreach_drafted_at, fit_score, work_mode, email_draft_id, email_to, email_sent_at FROM jobs WHERE id = ?`,
 		id,
 	).Scan(&j.ID, &j.Provider, &j.CompanySlug, &j.CompanyName, &j.ExternalID,
 		&j.Title, &j.Location, &j.URL, &j.PostedAt, &j.FirstSeenAt, &j.Status, &j.Notes, &j.ManualJDText, &j.ManualOutreachInstruction,
-		&j.OutreachStatus, &j.FounderName, &j.FounderEmail, &j.OutreachDraftedAt, &j.FitScore, &j.WorkMode)
+		&j.OutreachStatus, &j.FounderName, &j.FounderEmail, &j.OutreachDraftedAt, &j.FitScore, &j.WorkMode,
+		&j.EmailDraftID, &j.EmailTo, &j.EmailSentAt)
 	return j, err
 }
 

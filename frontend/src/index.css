@@ -355,3 +355,42 @@ button:disabled {
   font-size: 0.8em;
   color: var(--muted);
 }
+
+.email-link {
+  display: block;
+  margin-bottom: 0.3rem;
+  font-weight: 600;
+}
+.email-page {
+  max-width: 820px;
+}
+.email-page section {
+  margin-top: 1.5rem;
+}
+.compose label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin-bottom: 0.75rem;
+}
+.compose input,
+.compose textarea {
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+}
+.email-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+.email-msg {
+  margin-top: 0.75rem;
+}
+.referrals ul {
+  padding-left: 1.2rem;
+}
+.referrals li {
+  margin-bottom: 0.5rem;
+}

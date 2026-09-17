@@ -280,7 +280,7 @@ export default function Jobs() {
                     <span
                       className="fit-badge"
                       title={job.workMode || undefined}
-                      style={{ color: job.fitScore >= 70 ? 'var(--good, #2e7d32)' : job.fitScore >= 40 ? 'inherit' : 'var(--bad, #c62828)' }}
+                      style={{ color: job.fitScore >= 70 ? 'var(--accent)' : job.fitScore >= 40 ? 'inherit' : 'var(--danger)' }}
                     >
                       {job.fitScore}
                       {job.workMode ? ` · ${job.workMode}` : ''}
@@ -311,6 +311,9 @@ export default function Jobs() {
                   />
                 </td>
                 <td className="outreach-cell">
+                  <a className="email-link" href={`/jobs/${job.id}/email`}>
+                    {job.emailSentAt ? 'Emailed ✓' : job.emailDraftId ? 'Email (draft)' : 'Email / referrals'}
+                  </a>
                   {job.outreachStatus === 'drafted' ? (
                     <span className="outreach-drafted">
                       Drafted — {job.founderName || job.founderEmail}
