@@ -233,4 +233,26 @@ Retrieval recognizes explicit aliases such as auth/authn/authentication and auth
 
 Schema 1 artifacts and prior Jev/Laya comparison inputs remain frozen. Current ledger validation rejects schema 1 and explains that it must be regenerated into a fresh output path. The ledger CLI refuses to overwrite an existing output. Regeneration changes evidence selection; its predictions must be treated as a new experiment rather than scored against old packet hashes. No candidate facts or human labels were edited, and no additional hosted Jev requests were made for this retrieval step.
 
+### Production responsibility shadow observer
+
+`production_shadow.py` is inactive unless `JOBWATCH_JEV_SHADOW_ENABLED=1` is exported. The existing tailoring wrappers export the PVC `.env`; add the authorized `JEV_API_KEY` there securely. Never display the key to verify configuration. Setting the flag to `0` stops new observations in subsequent tailoring processes without changing the existing pipeline.
+
+The hook observes resolved JDs before the existing engineering and experience filters, then records their outcome or the existing judge's result. It never changes those decisions, resume contents, notifications or outreach. Storage is separate at `/opt/jobwatch/logs/shadow.db`. Rebuilds attach the previous tracked verdict with its historical source and date.
+
+Each request selects at most three exact English verb-led responsibility lines and up to nine retrieved candidate contexts. Unresolved, incomplete and review-only contexts are excluded. This is a narrow responsibility observation, not a complete job-fit assessment. Selection may miss responsibilities; inspect stored payloads before interpreting labels. The production rubric includes context qualifications and therefore is a new experiment, not the frozen paired benchmark. Confidence remains uncalibrated.
+
+Fixed limits are 20 paid reservations and 100,000 conservatively reserved input tokens per UTC day, 16,000 request bytes, and a ten-second elapsed deadline for the isolated HTTP process. Reservations use serialized UTF-8 bytes plus 2,048 framing allowance; this is an operational estimate, not an exact tokenizer guarantee. Unexpected usage above reservation stops further requests that day. At the documented $0.042 per million input tokens, 100,000 tokens estimates $0.0042; actual billing and balance are provider-side.
+
+Reservations commit before requests. The job ID, JD/profile hashes, model, rubric and complete payload form the deduplication identity. Paid failures and uncertain outcomes are retained without automatic retry. Missing-key and budget-exhausted unpaid observations can become eligible later. Database, source and provider errors fail open to the original pipeline; status logs omit secret values and provider error bodies.
+
+Inspect status and usage without printing payloads or credentials:
+
+```sql
+SELECT day,status,count(*) FROM observations GROUP BY day,status;
+SELECT day,sum(reserved_tokens),sum(input_tokens) FROM observations GROUP BY day;
+SELECT job_id,status,legacy_judgment,result,error_code FROM observations ORDER BY rowid DESC LIMIT 10;
+```
+
+Deploy with the flag disabled, verify source hashes and dashboard/worker readiness, then run one observer-only request and its duplicate against an existing captured JD. Confirm separate persistence and unchanged job/resume records before enabling observation. Do not run a local Telegram consumer or local polling process against production credentials. Rollback of the observer is the flag change; rollback of broader source or database migrations requires the deployment backup and separate assessment of newly written data.
+
 Final local verification on 49 capability selections: misses fell from 10 to 9; auth middleware is retrieved for authentication. Excluding 17 structural labels leaves 116 indexed lines with stable substantive fact IDs. A cached NLI run completed 111 context/claim rows without truncation (maximum 190 input tokens). Spurious entailments remain; no model-quality improvement is claimed. All 262 Python tests passed. Final artifacts: `reports/retrieval-context-20261011/ledger-v2-final.json` and `support-predictions-v2-final.json`. No additional hosted requests or production changes.

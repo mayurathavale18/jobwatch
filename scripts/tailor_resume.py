@@ -1700,6 +1700,10 @@ def rebuild_one(job_id, reply_to_message_id=None, mode="fix", instruction=None):
 
     job = {"company_name": company, "title": title, "url": url, **job}
     jd_text, jd_unavailable = fetch_jd_text_for_job(job)
+    observe_job_shadow(job, jd_text, jd_unavailable, legacy_judgment={
+        "verdict": entry.get("verdict"), "source": "existing_tailored_entry",
+        "fit_score": entry.get("fit_score"), "observed_at": entry.get("tailored_date"),
+    })
     jd_data = {
         "title": title, "company_name": company, "content_text": jd_text,
         "content_html": "", "location": job.get("location", ""), "absolute_url": url,
@@ -1884,6 +1888,31 @@ def fetch_jd_text_for_job(job):
 
     return jd_data.get("content_text", ""), jd_unavailable
 
+def observe_job_shadow(job, jd_text, jd_unavailable, legacy_judgment=None):
+    """Shadow failures never change the existing tailoring path."""
+    if os.environ.get("JOBWATCH_JEV_SHADOW_ENABLED") != "1":
+        return None
+    try:
+        from production_shadow import observe
+        result = observe(job, jd_text, jd_unavailable, legacy_judgment=legacy_judgment,
+                         db_path=REPO_ROOT / "logs" / "shadow.db", facts_path=FACTS_MD_PATH)
+        log(f"Jev shadow: {result['status']}")
+        return result
+    except Exception:
+        log("WARN: Jev shadow unavailable; continuing existing tailoring")
+        return None
+
+
+def record_job_shadow_legacy(shadow, judgment):
+    if not shadow or not shadow.get("request_hash"):
+        return
+    try:
+        from production_shadow import record_legacy
+        record_legacy(shadow["request_hash"], judgment, db_path=REPO_ROOT / "logs" / "shadow.db")
+    except Exception:
+        log("WARN: Jev shadow comparison unavailable; continuing existing tailoring")
+
+
 def process_job(job, tailored, min_fit=0):
     """Process one job dict from the jobs table: fetch JD (Greenhouse API,
     falling back to fetch_jd_generic for anything else), generate and
@@ -1904,9 +1933,11 @@ def process_job(job, tailored, min_fit=0):
     jd_text, jd_unavailable = fetch_jd_text_for_job(job)
     if jd_unavailable:
         log(f"WARN: Could not fetch usable JD for {jid}; using title only")
+    shadow = observe_job_shadow(job, jd_text, jd_unavailable)
     jd_data = {"title": title, "content_text": jd_text}
 
     if not is_engineering_role(title, jd_text):
+        record_job_shadow_legacy(shadow, {"verdict": "skipped_non_eng", "source": "existing_filter"})
         log(f"SKIPPED (non-engineering): {title}")
         tailored[jid] = {
             "company": company, "title": title, "url": url,
@@ -1920,6 +1951,7 @@ def process_job(job, tailored, min_fit=0):
         return tailored, "skipped_non_eng"
 
     if exceeds_experience_cap(jd_text):
+        record_job_shadow_legacy(shadow, {"verdict": "skipped_over_experience", "source": "existing_filter"})
         required = max_required_years(jd_text)
         log(f"SKIPPED (over experience cap): {title} (requires {required}+ years)")
         tailored[jid] = {
@@ -1974,6 +2006,7 @@ def process_job(job, tailored, min_fit=0):
 
     if not success:
         log(f"  FAILED after 2 attempts: {(final_error or '')[:200]}")
+        record_job_shadow_legacy(shadow, {"verdict": "tailoring_failed", "source": "existing_pipeline"})
         tailored[jid] = {
             "company": company, "title": title, "url": url,
             "pdf_path": None, "tex_path": str(tex_path) if tex_path.exists() else None,
@@ -1988,6 +2021,7 @@ def process_job(job, tailored, min_fit=0):
     log(f"  Coverage score: {score} ({len(covered)}/{len(jd_keywords)} keywords)")
 
     judgment = llm_judge(jd_text, resume_text, title, company)
+    record_job_shadow_legacy(shadow, judgment)
 
     tailored[jid] = {
         "company": company, "title": title, "url": url,

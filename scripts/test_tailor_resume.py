@@ -1666,3 +1666,27 @@ def test_jd_metadata_distinguishes_unknown_freshness_and_missing():
     assert meta["last_seen_at"] is None
     assert len(meta["sha256"]) == 64
     assert tr.jd_metadata({}, "Engineer", True)["availability"] == "missing"
+
+
+def test_shadow_failure_does_not_change_existing_low_fit_gate(monkeypatch, tmp_path):
+    import production_shadow
+    statuses, sends = _patch_process_job_pipeline(monkeypatch, tmp_path, fit_score=20)
+    monkeypatch.setenv("JOBWATCH_JEV_SHADOW_ENABLED", "1")
+    monkeypatch.setattr(production_shadow, "observe", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("private-key-value")))
+    logs = []
+    monkeypatch.setattr(tr, "log", logs.append)
+    _, outcome = tr.process_job(_jd_job(70), {}, min_fit=45)
+    assert outcome == "skipped_low_fit" and statuses == ["ignored"] and sends == []
+    assert "private-key-value" not in " ".join(logs)
+
+
+def test_shadow_observes_before_experience_filter_without_overriding_it(monkeypatch, tmp_path):
+    statuses, sends = _patch_process_job_pipeline(monkeypatch, tmp_path, fit_score=90)
+    calls = []
+    monkeypatch.setattr(tr, "observe_job_shadow", lambda *a: (calls.append("observe"), {"request_hash": "hash", "label": "strong_match"})[1])
+    monkeypatch.setattr(tr, "record_job_shadow_legacy", lambda shadow, judgment: calls.append(judgment["verdict"]))
+    monkeypatch.setattr(tr, "exceeds_experience_cap", lambda _: True)
+    monkeypatch.setattr(tr, "max_required_years", lambda _: 5)
+    _, outcome = tr.process_job(_jd_job(71), {})
+    assert calls == ["observe", "skipped_over_experience"]
+    assert outcome == "skipped_over_experience" and statuses == ["ignored"] and sends == []

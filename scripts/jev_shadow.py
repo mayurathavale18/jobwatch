@@ -22,11 +22,11 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
-def request(body, key):
+def request(body, key, timeout=60):
     req = urllib.request.Request(ENDPOINT, data=body, method="POST", headers={
         "Authorization": "Bearer " + key, "Content-Type": "application/json"})
     try:
-        with urllib.request.build_opener(NoRedirect()).open(req, timeout=60) as response:
+        with urllib.request.build_opener(NoRedirect()).open(req, timeout=timeout) as response:
             raw = response.read(1_000_001)
         if len(raw) > 1_000_000:
             raise ValueError("Oversized response")
