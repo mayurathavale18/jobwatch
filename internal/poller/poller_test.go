@@ -175,10 +175,8 @@ func TestRunBackfillSkipsNotifications(t *testing.T) {
 	}
 }
 
-func TestRunFuzzyDedupSuppressesSamePostingFromDifferentProvider(t *testing.T) {
-	// Same real posting, discovered via two different providers with
-	// unrelated external IDs -- exact (provider, company_slug, external_id)
-	// dedup can't catch this, but ExistsFuzzyTx should.
+func TestRunPreservesSimilarPostingsFromDifferentProviders(t *testing.T) {
+	// Matching metadata is only a possible duplicate; preserve both source IDs.
 	fp := &fakeProvider{
 		jobs: map[string][]providers.Job{
 			"stripe": {{
@@ -212,16 +210,16 @@ func TestRunFuzzyDedupSuppressesSamePostingFromDifferentProvider(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if result.NewJobs != 1 {
-		t.Errorf("NewJobs = %d, want 1 (second is a fuzzy-dedup match of the first)", result.NewJobs)
+	if result.NewJobs != 2 {
+		t.Errorf("NewJobs = %d, want 2 (similarity is not proof of identity)", result.NewJobs)
 	}
 
 	rows, err := st.ListJobs(context.Background(), store.JobFilter{})
 	if err != nil {
 		t.Fatalf("ListJobs: %v", err)
 	}
-	if len(rows) != 1 {
-		t.Fatalf("expected 1 job stored, got %d", len(rows))
+	if len(rows) != 2 {
+		t.Fatalf("expected 2 jobs stored, got %d", len(rows))
 	}
 }
 
@@ -246,5 +244,33 @@ func TestRunContinuesAfterCompanyFailure(t *testing.T) {
 	}
 	if len(result.Errors) != 1 {
 		t.Fatalf("expected 1 error, got %v", result.Errors)
+	}
+}
+
+func TestRunRefreshesKnownPostingWithoutRenotifying(t *testing.T) {
+	original := job("stripe", "1", "Backend Engineer")
+	fp := &fakeProvider{jobs: map[string][]providers.Job{"stripe": {original}}}
+	notifier := &fakeNotifier{}
+	p, st := newTestPoller(t, fp, notifier)
+	if _, err := p.Run(context.Background(), false); err != nil {
+		t.Fatal(err)
+	}
+	rows, _ := st.ListJobs(context.Background(), store.JobFilter{})
+	if err := st.UpdateStatus(context.Background(), rows[0].ID, store.StatusApplied); err != nil {
+		t.Fatal(err)
+	}
+	original.Title = "Updated Backend Engineer"
+	original.Raw = []byte(`{"content":"new description"}`)
+	fp.jobs["stripe"] = []providers.Job{original}
+	result, err := p.Run(context.Background(), false)
+	if err != nil || result.NewJobs != 0 {
+		t.Fatal(result, err)
+	}
+	rows, _ = st.ListJobs(context.Background(), store.JobFilter{})
+	if len(rows) != 1 || rows[0].Title != original.Title || rows[0].Status != store.StatusApplied {
+		t.Fatal(rows)
+	}
+	if len(notifier.sent) != 1 {
+		t.Fatalf("renotified existing job: %d", len(notifier.sent))
 	}
 }

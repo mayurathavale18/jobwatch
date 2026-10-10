@@ -3,6 +3,7 @@ package providers
 import (
 	"encoding/json"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -357,5 +358,35 @@ func TestParseRemotive(t *testing.T) {
 	}
 	if jobs[1].PostedAt != nil {
 		t.Errorf("empty publication_date should give nil PostedAt")
+	}
+}
+
+func TestCapturedPostingPreservesDescriptionAndUnknownFields(t *testing.T) {
+	cases := []struct {
+		name  string
+		parse func([]byte, config.Company) ([]Job, error)
+		body  string
+	}{
+		{"greenhouse", parseGreenhouseJSON, `{"jobs":[{"id":123,"title":"Engineer","content":"Full requirements","compensation":{"currency":"USD"}}]}`},
+		{"ashby", parseAshbyJSON, `{"jobs":[{"id":"123","title":"Engineer","isListed":true,"descriptionPlainText":"Full requirements","compensation":{"currency":"USD"}}]}`},
+		{"lever", parseLeverJSON, `[{"id":"123","text":"Engineer","descriptionPlain":"Full requirements","compensation":{"currency":"USD"}}]`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			jobs, err := tc.parse([]byte(tc.body), config.Company{Name: "Example", Slug: "example"})
+			if err != nil || len(jobs) != 1 {
+				t.Fatalf("jobs=%v err=%v", jobs, err)
+			}
+			var raw map[string]json.RawMessage
+			if err := json.Unmarshal(jobs[0].Raw, &raw); err != nil {
+				t.Fatal(err)
+			}
+			if string(raw["compensation"]) != `{"currency":"USD"}` {
+				t.Fatalf("compensation lost: %s", jobs[0].Raw)
+			}
+			if !strings.Contains(string(jobs[0].Raw), "Full requirements") {
+				t.Fatalf("description lost: %s", jobs[0].Raw)
+			}
+		})
 	}
 }

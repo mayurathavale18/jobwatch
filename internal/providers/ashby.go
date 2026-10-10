@@ -28,7 +28,7 @@ func NewAshby(client *http.Client) *Ashby {
 }
 
 type ashbyResponse struct {
-	Jobs []ashbyJob `json:"jobs"`
+	Jobs []json.RawMessage `json:"jobs"`
 }
 
 type ashbyJob struct {
@@ -77,14 +77,15 @@ func parseAshbyJSON(data []byte, company config.Company) ([]Job, error) {
 func parseAshby(body ashbyResponse, company config.Company) ([]Job, error) {
 	now := time.Now().UTC()
 	jobs := make([]Job, 0, len(body.Jobs))
-	for _, j := range body.Jobs {
-		if !j.IsListed {
-			continue
+	for _, raw := range body.Jobs {
+		var j ashbyJob
+		err := json.Unmarshal(raw, &j)
+		if err != nil {
+			return nil, fmt.Errorf("ashby %s: decode posting: %w", company.Slug, err)
 		}
 
-		raw, err := json.Marshal(j)
-		if err != nil {
-			return nil, fmt.Errorf("ashby %s: marshal raw: %w", company.Slug, err)
+		if !j.IsListed {
+			continue
 		}
 
 		var postedAt *time.Time

@@ -20,8 +20,10 @@ import (
 	"syscall"
 	"time"
 
+	"io"
 	"jobwatch/internal/config"
 	"jobwatch/internal/eventq"
+	"jobwatch/internal/jobsubmit"
 	"jobwatch/internal/notify"
 	"jobwatch/internal/poller"
 	"jobwatch/internal/providers"
@@ -43,6 +45,8 @@ func main() {
 
 	var err error
 	switch cmd {
+	case "import-jobs":
+		err = runImportJobs(args)
 	case "poll":
 		err = runPoll(args, false)
 	case "backfill":
@@ -76,6 +80,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, `jobwatch — job-opening tracker
 
 Usage:
+  jobwatch import-jobs -file alerts.json [-config config.yaml] [-apply]  preview or import exported alerts; no notifications
   jobwatch poll        [-config config.yaml]   run one polling cycle, notify on new matches, then exit
   jobwatch backfill    [-config config.yaml]   poll and store everything as seen, without notifying
   jobwatch serve       [-config config.yaml]   run the dashboard web server
@@ -394,4 +399,55 @@ func runLoggedScript(ctx context.Context, logsDir, script string, args ...string
 		return fmt.Errorf("%s: %w: %s", filepath.Base(script), runErr, last)
 	}
 	return nil
+}
+
+func runImportJobs(args []string) error {
+	fs := flag.NewFlagSet("import-jobs", flag.ContinueOnError)
+	file := fs.String("file", "", "JSON array of exported job records")
+	apply := fs.Bool("apply", false, "insert validated records")
+	cfg, err := loadConfigFlag(fs, args)
+	if err != nil {
+		return err
+	}
+	if *file == "" {
+		return fmt.Errorf("-file is required")
+	}
+	f, err := os.Open(*file)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return err
+	}
+	if info.Size() > 10*1024*1024 {
+		return fmt.Errorf("input exceeds 10 MiB")
+	}
+	dec := json.NewDecoder(io.LimitReader(f, 10*1024*1024+1))
+	dec.DisallowUnknownFields()
+	var records []jobsubmit.ImportRecord
+	if err := dec.Decode(&records); err != nil {
+		return err
+	}
+	var extra any
+	if err := dec.Decode(&extra); err != io.EOF {
+		return fmt.Errorf("input must contain one JSON array")
+	}
+	if len(records) > 2000 {
+		return fmt.Errorf("at most 2000 records per import")
+	}
+	var st *store.Store
+	if *apply {
+		st, err = store.Open(cfg.DBPath)
+		if err != nil {
+			return err
+		}
+		defer st.Close()
+	}
+	result, err := jobsubmit.ImportRecords(context.Background(), st, records, *apply)
+	if err != nil {
+		return err
+	}
+	return json.NewEncoder(os.Stdout).Encode(result)
 }

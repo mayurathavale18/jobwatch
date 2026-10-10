@@ -514,3 +514,127 @@ func TestMatchConnections(t *testing.T) {
 		t.Errorf("CountConnections = %d, want 3", n)
 	}
 }
+
+func TestRefreshSourcePreservesCandidateState(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	j := sampleJob()
+	j.JDText = "Manual requirements"
+	tx, _ := s.BeginTx(ctx)
+	id, err := s.InsertJob(ctx, tx, j, StatusApplied)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	j.Title = "Updated Backend Engineer"
+	j.Raw = []byte(`{"content":"Updated requirements"}`)
+	tx, _ = s.BeginTx(ctx)
+	if err := s.RefreshJobTx(ctx, tx, j); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	var title, status, manual, raw, seen string
+	if err := s.db.QueryRow(`SELECT title,status,manual_jd_text,raw,last_seen_at FROM jobs WHERE id=?`, id).Scan(&title, &status, &manual, &raw, &seen); err != nil {
+		t.Fatal(err)
+	}
+	if title != j.Title || status != StatusApplied || manual != j.JDText || raw != string(j.Raw) || seen == "" {
+		t.Fatalf("refresh lost state: %q %q %q %q %q", title, status, manual, raw, seen)
+	}
+	if err := s.migrate(); err != nil {
+		t.Fatalf("repeated migration: %v", err)
+	}
+}
+
+func TestSourceScanDistinguishesFailureAndBoundedScope(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	id, _ := s.StartPollRun(ctx)
+	if err := s.RecordSourceScan(ctx, id, "workday", "example", "bounded_pages", 300, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RecordSourceScan(ctx, id, "ashby", "example", "board_snapshot", 0, "timeout"); err != nil {
+		t.Fatal(err)
+	}
+	var status, scope string
+	if err := s.db.QueryRow(`SELECT status,scope FROM source_scans ORDER BY id LIMIT 1`).Scan(&status, &scope); err != nil {
+		t.Fatal(err)
+	}
+	if status != "success" || scope != "bounded_pages" {
+		t.Fatal(status, scope)
+	}
+	var failures int
+	s.db.QueryRow(`SELECT count(*) FROM source_scans WHERE status='failed'`).Scan(&failures)
+	if failures != 1 {
+		t.Fatal(failures)
+	}
+}
+
+func TestSimilarRequisitionsRetainedAsUnconfirmedRelations(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	j := sampleJob()
+	tx, _ := s.BeginTx(ctx)
+	first, err := s.InsertJob(ctx, tx, j, StatusApplied)
+	if err != nil {
+		t.Fatal(err)
+	}
+	j.ExternalID = "distinct-requisition"
+	second, err := s.InsertJob(ctx, tx, j, StatusNew)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if err := s.LinkSimilarJobsTx(ctx, tx, second, j, time.Now().Add(-24*time.Hour)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	var related int64
+	var confirmed, count int
+	if err := s.db.QueryRow(`SELECT related_job_id,confirmed,count(*) FROM job_relations WHERE job_id=?`, second).Scan(&related, &confirmed, &count); err != nil {
+		t.Fatal(err)
+	}
+	if related != first || confirmed != 0 || count != 1 {
+		t.Fatal(related, confirmed, count)
+	}
+	rows, _ := s.ListJobs(ctx, JobFilter{})
+	if len(rows) != 2 {
+		t.Fatalf("lost requisition: %v", rows)
+	}
+}
+
+func TestApplicationHistoryCapturesAllStatusAndContactWriters(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	tx, _ := s.BeginTx(ctx)
+	id, err := s.InsertJob(ctx, tx, sampleJob(), StatusNew)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if err := s.UpdateStatus(ctx, id, StatusApplied); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// The Python composer writes these same fields directly; the trigger covers both languages.
+	for range 2 {
+		if _, err := s.db.Exec(`UPDATE jobs SET email_to='recruiter@example.test',email_sent_at='2026-10-10T00:00:00Z' WHERE id=?`, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var statuses, contacts int
+	s.db.QueryRow(`SELECT count(*) FROM application_events WHERE kind='status' AND detail='applied'`).Scan(&statuses)
+	s.db.QueryRow(`SELECT count(*) FROM application_events WHERE kind='contact_sent' AND json_extract(detail,'$.to')='recruiter@example.test' AND occurred_at='2026-10-10T00:00:00Z'`).Scan(&contacts)
+	if statuses != 1 || contacts != 1 {
+		t.Fatal(statuses, contacts)
+	}
+}
