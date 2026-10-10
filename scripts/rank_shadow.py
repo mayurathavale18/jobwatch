@@ -81,6 +81,78 @@ def digest(value):
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
+def evaluate_packets(cases, packets, profile, predictions, labels):
+    """Measure independent human holdout agreement on selected responsibilities only."""
+    validate_packets(packets, cases, profile)
+    allowed = set(FIT_QUESTION["responsibility_fit"]["criteria"])
+    packets_by_id = {str(p["id"]): p for p in packets}
+    if not isinstance(predictions, list) or any(not isinstance(p, dict) for p in predictions):
+        raise ValueError("Expected a prediction array")
+    by_id = {}
+    for prediction in predictions:
+        key = str(prediction["id"])
+        if key in by_id or key not in packets_by_id:
+            raise ValueError("Duplicate or unknown prediction id")
+        packet = packets_by_id[key]
+        state = {field: packet[field] for field in ("candidate_evidence", "posting_evidence")}
+        for field, expected in (("state_sha256", packet["state_sha256"]),
+                                ("profile_sha256", digest(profile)),
+                                ("packet_sha256", digest(json.dumps(state, sort_keys=True))),
+                                ("rubric_sha256", digest(json.dumps(FIT_QUESTION, sort_keys=True)))):
+            if prediction.get(field) != expected:
+                raise ValueError("Prediction " + field + " does not match frozen evidence")
+        if prediction.get("selected_evidence") != state or prediction.get("selection_version") != 1:
+            raise ValueError("Prediction selected evidence does not match packet")
+        if prediction.get("advisory_only") is not True or prediction.get("scope") != "selected_responsibilities_only":
+            raise ValueError("Prediction must remain advisory with selected responsibility scope")
+        confidence = prediction.get("confidence")
+        abstained = prediction.get("abstained")
+        if prediction.get("label") not in allowed or not isinstance(abstained, bool):
+            raise ValueError("Invalid prediction label or abstention")
+        if abstained != (prediction["label"] == "insufficient_evidence"):
+            raise ValueError("Invalid prediction abstention")
+        if confidence is None:
+            if not abstained or prediction.get("reason") != "context_budget_exceeded":
+                raise ValueError("Invalid prediction confidence")
+        elif isinstance(confidence, bool) or not isinstance(confidence, (int, float)) or not math.isfinite(confidence) or not 0 <= confidence <= 1:
+            raise ValueError("Invalid prediction confidence")
+        by_id[key] = prediction
+    if not isinstance(labels, list) or any(not isinstance(label, dict) for label in labels):
+        raise ValueError("Expected a human label array")
+    seen, holdout = set(), []
+    for label in labels:
+        key = str(label["id"])
+        if key in seen or key not in packets_by_id:
+            raise ValueError("Duplicate or unknown label id")
+        seen.add(key)
+        if label.get("label") is not None and label.get("label") not in allowed:
+            raise ValueError("Invalid human label")
+        if label.get("split") not in {"holdout", "train", "unassigned"}:
+            raise ValueError("Invalid label split")
+        if label.get("label") is not None and (label.get("provenance") != "human" or any(not isinstance(label.get(field), str) or not label[field].strip() for field in ("annotator", "reason"))):
+            raise ValueError("Labels require independent human provenance, annotator and reason")
+        if label.get("label") is None and label.get("provenance") not in (None, "human"):
+            raise ValueError("Null labels cannot carry model provenance")
+        packet = packets_by_id[key]
+        state = {field: packet[field] for field in ("candidate_evidence", "posting_evidence")}
+        if label.get("packet_sha256") != digest(json.dumps(state, sort_keys=True)):
+            raise ValueError("Human label packet evidence has changed")
+        if label["label"] is not None and label["split"] == "holdout":
+            holdout.append(label)
+    matched = [(label["label"], by_id[str(label["id"])]) for label in holdout if str(label["id"]) in by_id]
+    classified = [(label, prediction) for label, prediction in matched if not prediction["abstained"]]
+    confusion = {label: {predicted: 0 for predicted in sorted(allowed)} for label in sorted(allowed)}
+    for label, prediction in classified:
+        confusion[label][prediction["label"]] += 1
+    return {"holdout_labeled": len(holdout), "matched": len(matched), "classified": len(classified),
+            "abstained": len(matched) - len(classified), "missing_predictions": len(holdout) - len(matched),
+            "coverage": len(classified) / len(holdout) if holdout else None,
+            "accuracy_classified": sum(label == p["label"] for label, p in classified) / len(classified) if classified else None,
+            "false_strong_matches": sum(label != "strong_match" and p["label"] == "strong_match" for label, p in classified),
+            "confusion": confusion,
+            "warning": "Independent human holdout agreement on selected responsibilities only; not complete role fit, interview probability or ATS performance."}
+
+
 def export_jobs(conn, limit):
     conn.row_factory = sqlite3.Row
     cases = []
@@ -162,18 +234,19 @@ def evaluate(cases, predictions, profile):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command",choices=["export","infer","infer-packets","evaluate"])
+    parser.add_argument("command",choices=["export","infer","infer-packets","evaluate","evaluate-packets"])
     parser.add_argument("--db",type=Path,default=Path(__file__).resolve().parent.parent/"jobwatch.db")
     parser.add_argument("--cases",type=Path)
     parser.add_argument("--predictions",type=Path)
     parser.add_argument("--profile",type=Path)
     parser.add_argument("--checkpoint",type=Path)
     parser.add_argument("--packets",type=Path)
+    parser.add_argument("--labels",type=Path)
     parser.add_argument("--out",type=Path,required=True)
     parser.add_argument("--limit",type=int,default=100)
     args = parser.parse_args()
     if any(path is not None and args.out.resolve() == path.resolve()
-           for path in (args.db, args.cases, args.profile, args.packets, args.predictions)):
+           for path in (args.db, args.cases, args.profile, args.packets, args.predictions, args.labels)):
         parser.error("output must not overwrite a source input")
     if args.command=="export":
         if not 1 <= args.limit <= 1000:
@@ -184,7 +257,14 @@ def main():
         if args.cases is None:
             parser.error("--cases required")
         cases = json.loads(args.cases.read_text(encoding="utf-8"))
-        if args.command=="evaluate":
+        if args.command=="evaluate-packets":
+            if any(path is None for path in (args.packets, args.profile, args.predictions, args.labels)):
+                parser.error("--packets, --profile, --predictions and --labels required")
+            result = evaluate_packets(cases, json.loads(args.packets.read_text(encoding="utf-8")),
+                                      args.profile.read_text(encoding="utf-8"),
+                                      json.loads(args.predictions.read_text(encoding="utf-8"))["predictions"],
+                                      json.loads(args.labels.read_text(encoding="utf-8")))
+        elif args.command=="evaluate":
             if args.predictions is None or args.profile is None:
                 parser.error("--predictions and --profile required")
             result = evaluate(cases,json.loads(args.predictions.read_text(encoding="utf-8"))["predictions"],args.profile.read_text(encoding="utf-8"))

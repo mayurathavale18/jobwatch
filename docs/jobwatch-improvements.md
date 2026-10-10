@@ -162,6 +162,20 @@ The old `evaluate` command intentionally accepts only its original label schema.
 
 Local packet smoke on 11 October 2026 used the same cached Laya 0.3.28 checkpoint, CPU and one thread. Two assistant-selected diagnostic packets contained 64 and 144 state tokens; both ran within the 316-token conservative budget. Load took 11.33 seconds, and forward passes took approximately 2.29 and 3.01 seconds. Both returned `strong_match`; these outputs are not independently labelled correctness or calibrated confidence. Exact excerpts prevent invented evidence, but selection can bias the result. Process RSS and Contabo performance remain unmeasured; parameter tensors alone occupy about 1.57 GiB.
 
+### Independently label responsibility packets
+
+Prepare labels before showing the model's outputs. Each label record contains `id`, `packet_sha256`, `label`, `split`, `annotator`, `provenance` and `reason`. Leave uncertain/unreviewed labels null with blank metadata. A recorded label must use `provenance: "human"`, a named annotator and a nonempty reason. Provenance is an explicit assertion, not authenticated proof of who labelled the data.
+
+Allowed packet labels are `strong_match`, `partial_match`, and `insufficient_evidence`. Judge the selected responsibility against the selected candidate evidence only. Keep this separate from `apply/review/skip`. Assign related jobs and employers to one development/holdout split before inspecting predictions; the current diagnostic pack keeps previously viewed Coinbase/Supabase pilot employers in development (`train`), with ElevenLabs/Temporal/Grafana held out. The evaluator scores only non-null holdout labels. Split discipline is a review responsibility; this CLI does not automatically discover every related listing.
+
+```powershell
+python scripts/rank_shadow.py evaluate-packets --cases cases.json --packets packets.json --profile candidate-profile.txt --predictions packet-predictions.json --labels human-labels.json --out packet-evaluation.json
+```
+
+The evaluator verifies posting/profile/packet/rubric hashes and the advisory scope. It separates missing predictions from abstentions and reports classified-only agreement, coverage, confusion and false strong matches. Unlabelled inputs produce no accuracy value. Its output cannot overwrite any source input. The older whole-JD evaluator remains unchanged.
+
+The local six-case pack in `reports/human-review-20261011/` has exact frozen excerpts, blank labels and no predictions shown. Three holdout cases are useful for error inspection, not a reliable accuracy estimate. Do not convert assistant recommendations into human labels or use this small purposive sample as evidence of interview/ATS outcomes.
+
 Each of the seven steps received independent read-only review, with identified blockers fixed before progressing. Final local verification: 151 Python tests passed, the full `go test ./...` suite passed in an isolated Linux container with the real existing frontend output, and an integrated disposable database exercise passed preview/import/idempotency/report/timeline/follow-up/export assertions. Python regression tests cover eligibility, captured descriptions, provenance, local workflow and shadow evaluation. Go tests cover capture, migrations, refreshes, identity, imports and application history.
 
 Changes have not been pushed to master or deployed. Master pushes auto-deploy. No live polling, Telegram consumption, account scraping, Gmail writes or recruiter messages were performed during implementation. The operations commands are CLI workflows; no new dashboard screens, email-alert parser or employer-board crawler were added.
