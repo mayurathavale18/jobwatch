@@ -36,11 +36,16 @@ def packets(ledger, cases, profile, mode):
             else:
                 for capability in clause["capabilities"]:
                     for fact in capability["candidates"] or [None]:
-                        item = dict(base, claim=capability["claim"], evidence="", fact_id=None,
-                                    unresolved=False, source_level=None, limitations=[])
+                        item = dict(base, claim=capability["claim"], evidence="", evidence_excerpt="", fact_id=None,
+                                    unresolved=False, source_level=None, limitations=[], context_complete=True,
+                                    context_start_line=None, context_end_line=None, context_lines=[], context_requires_review=False)
                         if fact:
-                            item.update(evidence=fact["text"], fact_id=fact["fact_id"], unresolved=fact["unresolved"],
-                                        source_level=fact["source_level"], limitations=fact["limitations"])
+                            item.update(evidence=fact["context_text"], evidence_excerpt=fact["text"],
+                                        fact_id=fact["fact_id"], unresolved=fact["context_unresolved"],
+                                        source_level=fact["source_level"], limitations=fact["context_limitations"],
+                                        context_complete=fact["context_complete"], context_start_line=fact["context_start_line"],
+                                        context_end_line=fact["context_end_line"], context_lines=fact["context_lines"],
+                                        context_requires_review=fact["context_requires_review"])
                         item["hypothesis"] = SUPPORT_TEMPLATE.format(claim=capability["claim"])
                         item["id"] = digest([record["id"], index, capability["claim"], item["fact_id"]])
                         result.append(item)
@@ -54,7 +59,7 @@ def infer(engine, items, mode):
     for item in items:
         prepared, tokens = engine.prepare(item)
         row = dict(item, packet_sha256=digest(item), input_tokens=tokens, token_budget=engine.budget,
-                   advisory_only=True, scope="role_family" if mode == "classify" else "single_fact_claim_support",
+                   advisory_only=True, scope="role_family" if mode == "classify" else "fact_context_claim_support",
                    confidence_calibrated=False)
         if tokens > engine.budget:
             row.update(label=None, scores=None, abstained=True, reason="context_budget_exceeded")
@@ -62,6 +67,12 @@ def infer(engine, items, mode):
             row.update(label=None, scores=None, abstained=True, reason="no_retrieved_evidence")
         elif mode == "support" and item["unresolved"]:
             row.update(label=None, scores=None, abstained=True, reason="unresolved_candidate_fact")
+        elif mode == "support" and not item["context_complete"]:
+            row.update(label=None, scores=None, abstained=True, reason="incomplete_candidate_context")
+        elif mode == "support" and item["source_level"] in {"familiar", "planned"}:
+            row.update(label=None, scores=None, abstained=True, reason="knowledge_level_not_demonstrated")
+        elif mode == "support" and item["context_requires_review"]:
+            row.update(label=None, scores=None, abstained=True, reason="context_qualification_requires_review")
         else:
             started = time.perf_counter()
             scores = engine.predict(prepared)

@@ -12,7 +12,7 @@ from evidence_ledger import build_ledger, digest
 def fixture():
     state = {"title": "Backend Engineer", "jd": "Implement Go authentication"}
     cases = [{"id": "one", "state": state, "state_sha256": digest(json.dumps(state, sort_keys=True))}]
-    profile = "# production\nImplemented Go authentication middleware\nGo [FILL: confirm]\n"
+    profile = "# production\nImplemented Go authentication middleware\n\nGo [FILL: confirm]\n"
     selections = [{"id": "one", "clauses": [{"evidence": state["jd"], "capabilities": ["Go authentication"]}]}]
     return build_ledger(cases, profile, selections, "facts.md"), cases, profile
 
@@ -145,3 +145,63 @@ def test_missing_retrieval_is_explicit_abstention():
     results = infer(engine, packets(ledger, cases, profile, "support"), "support")
     assert len(results) == 1 and results[0]["reason"] == "no_retrieved_evidence"
     assert engine.calls == 0
+
+
+def test_support_keeps_adjacent_qualification_and_abstains():
+    ledger, cases, _ = fixture()
+    profile = "# production\nImplemented Go authentication middleware\n[FILL: confirm what was implemented]\n"
+    selections = [{"id": "one", "clauses": [{"evidence": cases[0]["state"]["jd"], "capabilities": ["Go authentication"]}]}]
+    ledger = build_ledger(cases, profile, selections, "facts")
+    items = packets(ledger, cases, profile, "support")
+    assert items[0]["evidence"] == profile.split("\n", 1)[1].rstrip("\n")
+    assert items[0]["evidence_excerpt"] == "Implemented Go authentication middleware"
+    assert items[0]["context_start_line"] == 2 and items[0]["context_end_line"] == 3
+    engine = FakeEngine()
+    result = infer(engine, items, "support")[0]
+    assert result["reason"] == "unresolved_candidate_fact" and engine.calls == 0
+
+
+@pytest.mark.parametrize("heading", ["familiar", "planned"])
+def test_known_learning_level_is_not_demonstrated_support(heading):
+    _, cases, _ = fixture()
+    profile = f"# {heading}\nGo authentication middleware\n"
+    selections = [{"id": "one", "clauses": [{"evidence": cases[0]["state"]["jd"]}]}]
+    ledger = build_ledger(cases, profile, selections, "facts")
+    engine = FakeEngine()
+    result = infer(engine, packets(ledger, cases, profile, "support"), "support")[0]
+    assert result["reason"] == "knowledge_level_not_demonstrated" and engine.calls == 0
+
+
+def test_partial_context_never_reaches_model():
+    _, cases, _ = fixture()
+    profile = "# production\nGo authentication\n" + "detail\n" * 12
+    selections = [{"id": "one", "clauses": [{"evidence": cases[0]["state"]["jd"]}]}]
+    ledger = build_ledger(cases, profile, selections, "facts")
+    engine = FakeEngine()
+    result = infer(engine, packets(ledger, cases, profile, "support"), "support")[0]
+    assert result["reason"] == "incomplete_candidate_context" and engine.calls == 0
+
+
+@pytest.mark.parametrize("parent", ["planned", "familiar", "production [FILL: confirm]"])
+def test_nested_fact_cannot_bypass_parent_qualification(parent):
+    state = {"title": "Backend", "jd": "Kafka authentication"}
+    cases = [{"id": "one", "state": state, "state_sha256": digest(json.dumps(state, sort_keys=True))}]
+    profile = f"- {parent}: Kafka gateway\n  - Kafka authentication middleware\n"
+    ledger = build_ledger(cases, profile, [{"id": "one", "clauses": [{"evidence": state["jd"]}]}], "facts")
+    items = packets(ledger, cases, profile, "support")
+    assert f"- {parent}: Kafka gateway" in items[0]["evidence"]
+    engine = FakeEngine()
+    result = infer(engine, items, "support")[0]
+    assert result["abstained"] and engine.calls == 0
+
+
+def test_contextual_restriction_overrides_production_inference_not_provenance():
+    state = {"title": "Backend", "jd": "Kafka authentication"}
+    cases = [{"id": "one", "state": state, "state_sha256": digest(json.dumps(state, sort_keys=True))}]
+    profile = "# production\n- Kafka authentication\n  - Not production; familiar only\n"
+    ledger = build_ledger(cases, profile, [{"id": "one", "clauses": [{"evidence": state["jd"]}]}], "facts")
+    engine = FakeEngine()
+    engine.predict = lambda _: pytest.fail("Qualified fact must not reach the model")
+    result = infer(engine, packets(ledger, cases, profile, "support"), "support")[0]
+    assert result["source_level"] == "production" and result["context_requires_review"]
+    assert result["reason"] == "context_qualification_requires_review"

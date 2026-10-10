@@ -7,7 +7,11 @@ from rank_shadow import digest
 
 LEVELS = {"production", "used", "familiar", "planned", "unknown"}
 STOP = set("a an the and or in on for of to with using build building design designing implement implementing experienced experience strong background skills skill ability capable new core components systems system work working services service features feature".split())
-ALIASES = {"golang": "go", "postgres": "postgresql", "k8s": "kubernetes", "ts": "typescript"}
+ALIASES = {"golang": "go", "postgres": "postgresql", "k8s": "kubernetes", "ts": "typescript",
+           "auth": "authentication", "authn": "authentication", "authz": "authorization",
+           "agents": "agent", "queues": "queue", "databases": "database", "requests": "request",
+           "models": "model", "integrations": "integration", "migrations": "migration",
+           "indexes": "index", "hooks": "hook", "protocols": "protocol", "clusters": "cluster"}
 
 
 def tokens(text):
@@ -19,13 +23,16 @@ def facts_chunks(profile, source_path):
     source_hash = digest(profile)
     headings = []
     chunks = []
-    for line_number, line in enumerate(profile.splitlines(), 1):
+    lines = profile.splitlines()
+    raw_lines = profile.splitlines(keepends=True)
+    for line_number, line in enumerate(lines, 1):
         heading = re.match(r"^(#{1,6})\s+(.+)$", line)
         if heading:
             depth, title = len(heading[1]), heading[2]
             headings = [item for item in headings if item[0] < depth] + [(depth, title)]
             continue
-        if not line.strip() or re.fullmatch(r"\s*[-*_]{3,}\s*", line):
+        if (not line.strip() or re.fullmatch(r"\s*[-*_]{3,}\s*", line)
+                or re.fullmatch(r"\s*\*\*[^*]+\*\*\s*", line)):
             continue
         level = "unknown"
         for _, title in headings:
@@ -40,6 +47,64 @@ def facts_chunks(profile, source_path):
                        "source_path": str(source_path), "source_sha256": source_hash,
                        "start_line": line_number, "headings": [title for _, title in headings],
                        "source_level": level, "unresolved": "[FILL" in line, "limitations": limitations})
+    by_line = {chunk["start_line"]: chunk for chunk in chunks}
+    def boundary(number):
+        line = lines[number - 1]
+        return number not in by_line or re.fullmatch(r"\s*\*\*[^*]+\*\*\s*", line) is not None
+    for chunk in chunks:
+        number = chunk["start_line"]
+        start = end = number
+        is_bullet = re.match(r"^\s*[-*]\s+", chunk["text"]) is not None
+        # Nested evidence keeps ancestor scope, including planned/familiar qualifiers.
+        if is_bullet:
+            indent = len(chunk["text"]) - len(chunk["text"].lstrip())
+            cursor = number - 1
+            while indent and cursor >= 1 and not boundary(cursor):
+                preceding = lines[cursor - 1]
+                parent = re.match(r"^(\s*)[-*]\s+", preceding)
+                if parent and len(parent[1]) < indent:
+                    start = cursor
+                    indent = len(parent[1])
+                cursor -= 1
+        while start > 1 and not boundary(start - 1):
+            preceding = lines[start - 2]
+            if is_bullet:
+                break
+            if re.match(r"^\s*[-*]\s+", preceding):
+                if lines[start - 1][:1].isspace():
+                    start -= 1
+                    is_bullet = True
+                break
+            start -= 1
+        while end < len(lines) and not boundary(end + 1):
+            following = lines[end]
+            following_bullet = re.match(r"^(\s*)[-*]\s+", following)
+            parent_indent = len(lines[start - 1]) - len(lines[start - 1].lstrip())
+            if (following_bullet and (not is_bullet or len(following_bullet[1]) <= parent_indent)) or (is_bullet and not following[:1].isspace()):
+                break
+            end += 1
+        full_start, full_end = start, end
+        ancestors = [by_line[index] for index in range(start, number) if re.match(r"^\s*[-*]\s+", lines[index - 1])]
+        restricted = [fact["source_level"] for fact in ancestors if fact["source_level"] in {"planned", "familiar"}]
+        if restricted:
+            chunk["source_level"] = "planned" if "planned" in restricted else "familiar"
+        start, end = max(start, number - 3), min(end, number + 4)
+        while sum(len(raw_lines[index - 1]) for index in range(start, end + 1)) > 4000 and start < end:
+            if number - start > end - number:
+                start += 1
+            else:
+                end -= 1
+        context = [by_line[index] for index in range(start, end + 1)]
+        context_text = "".join(raw_lines[start - 1:end]).rstrip("\r\n")
+        chunk.update(context_text=context_text if len(context_text) <= 4000 else "",
+                     context_start_line=start, context_end_line=end,
+                     context_complete=start == full_start and end == full_end and len(chunk["text"]) <= 4000,
+                     context_lines=[{field: fact[field] for field in ("start_line", "text", "source_level", "unresolved", "limitations")} for fact in context],
+                     context_unresolved=any(fact["unresolved"] for fact in context),
+                     context_limitations=[text for fact in context for text in fact["limitations"]],
+                     context_requires_review=any(fact["source_level"] in {"familiar", "planned"} or re.search(
+                         r"\b(?:familiar only|not production|not implemented|not shipped|planned only|not hands-on|concepts only)\b",
+                         fact["text"], re.I) for fact in context))
     return chunks
 
 
@@ -58,6 +123,7 @@ def build_ledger(cases, profile, requirements, source_path):
             raise ValueError("Duplicate case or changed posting hash")
         by_id[key] = case
     facts = facts_chunks(profile, source_path)
+    fact_tokens = [(tokens(fact["context_text"]), tokens(fact["text"]), fact) for fact in facts]
     records, seen = [], set()
     for requirement in requirements:
         if not isinstance(requirement, dict) or not isinstance(requirement.get("id"), (str, int)) or isinstance(requirement["id"], bool):
@@ -84,14 +150,22 @@ def build_ledger(cases, profile, requirements, source_path):
             comparisons = []
             for claim in capabilities:
                 words = tokens(claim)
-                matches = [(words & tokens(fact["text"]), fact) for fact in facts]
-                matches = sorted((item for item in matches if item[0]), key=lambda item: (-len(item[0]), item[1]["start_line"]))[:3]
+                ranked = sorted(((words & indexed, words & primary, fact) for indexed, primary, fact in fact_tokens if words & indexed),
+                                key=lambda item: (-len(item[0]), -len(item[1]), item[2]["start_line"]))
+                matches, seen_contexts = [], set()
+                for overlap, _, fact in ranked:
+                    context_key = (fact["context_start_line"], fact["context_end_line"])
+                    if context_key not in seen_contexts:
+                        matches.append((overlap, fact))
+                        seen_contexts.add(context_key)
+                    if len(matches) == 3:
+                        break
                 comparisons.append({"claim": claim, "relation": "related_only" if matches else "no_candidates",
                     "candidates": [dict(fact, fact_id=fact["id"], overlap_tokens=sorted(overlap)) for overlap, fact in matches]})
             selected.append({"evidence": evidence, "capabilities": comparisons})
         records.append({"id": key, "state_sha256": case["state_sha256"], "profile_sha256": digest(profile), "clauses": selected})
     # shortcut: lexical overlap finds related text, use reviewed semantic retrieval only after benchmarking.
-    return {"schema_version": 1, "advisory_only": True, "scope": "requirement_evidence_retrieval",
+    return {"schema_version": 2, "advisory_only": True, "scope": "requirement_evidence_retrieval",
             "profile_sha256": digest(profile), "source_path": str(source_path), "facts": facts, "records": records}
 
 
@@ -99,6 +173,8 @@ def validate_ledger(ledger, cases, profile):
     """Recompute retrieval and every provenance field from frozen inputs."""
     if not isinstance(ledger, dict) or not isinstance(ledger.get("records"), list):
         raise ValueError("Malformed ledger")
+    if ledger.get("schema_version") != 2:
+        raise ValueError("Ledger schema 2 required; regenerate a fresh output without modifying frozen schema 1 artifacts")
     try:
         requirements = [{"id": record["id"], "clauses": [
             {"evidence": clause["evidence"], "capabilities": [item["claim"] for item in clause["capabilities"]]}
@@ -117,6 +193,8 @@ def main():
     args = parser.parse_args()
     if any(args.out.resolve() == source.resolve() or (args.out.exists() and source.exists() and args.out.samefile(source)) for source in (args.cases, args.facts, args.requirements)):
         raise ValueError("Output cannot overwrite input")
+    if args.out.exists():
+        raise ValueError("Output already exists; choose a fresh path to preserve frozen artifacts")
     for path in (args.cases, args.facts, args.requirements):
         if path.stat().st_size > 20_000_000:
             raise ValueError("Input exceeds 20 MB")
