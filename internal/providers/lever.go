@@ -54,7 +54,7 @@ func (l *Lever) Fetch(ctx context.Context, company config.Company) ([]Job, error
 		return nil, fmt.Errorf("lever %s: unexpected status %d", company.Slug, resp.StatusCode)
 	}
 
-	var postings []leverPosting
+	var postings []json.RawMessage
 	if err := json.NewDecoder(resp.Body).Decode(&postings); err != nil {
 		return nil, fmt.Errorf("lever %s: decode: %w", company.Slug, err)
 	}
@@ -63,20 +63,21 @@ func (l *Lever) Fetch(ctx context.Context, company config.Company) ([]Job, error
 }
 
 func parseLeverJSON(data []byte, company config.Company) ([]Job, error) {
-	var postings []leverPosting
+	var postings []json.RawMessage
 	if err := json.Unmarshal(data, &postings); err != nil {
 		return nil, fmt.Errorf("lever %s: decode: %w", company.Slug, err)
 	}
 	return parseLever(postings, company)
 }
 
-func parseLever(postings []leverPosting, company config.Company) ([]Job, error) {
+func parseLever(postings []json.RawMessage, company config.Company) ([]Job, error) {
 	now := time.Now().UTC()
 	jobs := make([]Job, 0, len(postings))
-	for _, p := range postings {
-		raw, err := json.Marshal(p)
+	for _, raw := range postings {
+		var p leverPosting
+		err := json.Unmarshal(raw, &p)
 		if err != nil {
-			return nil, fmt.Errorf("lever %s: marshal raw: %w", company.Slug, err)
+			return nil, fmt.Errorf("lever %s: decode posting: %w", company.Slug, err)
 		}
 
 		var postedAt *time.Time

@@ -6,6 +6,7 @@ verifies one page, updates tracker, and sends Telegram notifications.
 """
 
 import base64
+import hashlib
 import json
 import os
 import re
@@ -1512,7 +1513,7 @@ def _contains_word(text, phrase):
 
 def is_engineering_role(title, jd_text):
     """Skip clearly non-engineering roles that violate truth lock."""
-    text = (title + " " + jd_text).lower()
+    title_text = title.lower()
     non_eng = [
         "account executive", "sales executive", "business development",
         "cloud billing associate", "billing operations", "billing analyst",
@@ -1522,7 +1523,7 @@ def is_engineering_role(title, jd_text):
         "office manager", "administrative", "executive assistant"
     ]
     for term in non_eng:
-        if _contains_word(text, term):
+        if _contains_word(title_text, term):
             return False
     # Must contain an engineering keyword
     eng_terms = [
@@ -1532,6 +1533,8 @@ def is_engineering_role(title, jd_text):
         "infrastructure", "platform", "solutions engineer", "solutions architect",
         "forward deployed", "technical solutions", "systems engineer"
     ]
+    # Department/legal boilerplate in a JD must not override an engineering title.
+    text = (title + " " + jd_text).lower()
     return any(_contains_word(text, term) for term in eng_terms)
 
 MAX_YEARS_CAP = 3
@@ -1547,10 +1550,25 @@ def max_required_years(jd_text):
     experience" -> 3, the lower bound of a range), or None if the text
     states no such requirement.
     """
-    matches = YEARS_EXPERIENCE_RE.findall(jd_text or "")
-    if not matches:
-        return None
-    return max(int(m) for m in matches)
+    required = []
+    preferred_section = False
+    # ponytail: prose without recognizable section/clause boundaries remains heuristic;
+    # move to evidence-labelled requirements when the eligibility stage is introduced.
+    for clause in re.split(r"[.;\n]|,\s*(?=(?:preferred|required|minimum|nice[- ]to[- ]have)\b)", jd_text or "", flags=re.I):
+        clause = clause.strip()
+        preferred = re.search(r"\b(?:preferred|nice[- ]to[- ]have|desirable|bonus|a plus)\b", clause, re.I)
+        mandatory = re.search(r"\b(?:required|requirements|minimum|must[- ]have|essential)\b", clause, re.I)
+        if preferred and not mandatory:
+            if clause.endswith(":") or re.fullmatch(r"(?:preferred(?: qualifications| requirements| skills)?|nice[- ]to[- ]haves?|desirable(?: qualifications| skills)?|bonus(?: points)?)", clause, re.I):
+                preferred_section = True
+            continue
+        if mandatory:
+            preferred_section = False
+        elif clause.endswith(":") or re.fullmatch(r"(?:what you bring|what we (?:need|expect)|qualifications|requirements|about you|responsibilities|your (?:skills|experience))", clause, re.I):
+            preferred_section = False
+        if not preferred_section:
+            required.extend(int(m) for m in YEARS_EXPERIENCE_RE.findall(clause))
+    return max(required) if required else None
 
 def exceeds_experience_cap(jd_text, cap=MAX_YEARS_CAP):
     """True if jd_text states a minimum years-of-experience requirement
@@ -1680,21 +1698,16 @@ def rebuild_one(job_id, reply_to_message_id=None, mode="fix", instruction=None):
     conn.close()
     job = dict(row) if row else {"id": job_id, "company_name": company, "title": title, "url": url}
 
-    gh_slug = company_slug(company, url)
-    gh_id = extract_gh_job_id(url)
-    jd_data = fetch_greenhouse_job(gh_slug, gh_id) if (gh_id and gh_slug) else None
-    if not jd_data:
-        manual_jd_text = (job.get("manual_jd_text") or "").strip()
-        if manual_jd_text:
-            jd_data = {
-                "title": title, "company_name": company, "content_text": manual_jd_text,
-                "content_html": "", "location": "", "absolute_url": url,
-            }
-    if not jd_data:
-        jd_data = {
-            "title": title, "company_name": company, "content_text": title,
-            "content_html": "", "location": "", "absolute_url": url,
-        }
+    job = {"company_name": company, "title": title, "url": url, **job}
+    jd_text, jd_unavailable = fetch_jd_text_for_job(job)
+    observe_job_shadow(job, jd_text, jd_unavailable, legacy_judgment={
+        "verdict": entry.get("verdict"), "source": "existing_tailored_entry",
+        "fit_score": entry.get("fit_score"), "observed_at": entry.get("tailored_date"),
+    })
+    jd_data = {
+        "title": title, "company_name": company, "content_text": jd_text,
+        "content_html": "", "location": job.get("location", ""), "absolute_url": url,
+    }
 
     comp_slug = company_slug(company, url)
     title_slug = slugify(title)
@@ -1777,6 +1790,8 @@ def rebuild_one(job_id, reply_to_message_id=None, mode="fix", instruction=None):
 
     tailored[job_id] = {
         **entry,
+        "jd_metadata": jd_metadata(job, jd_text, jd_unavailable),
+        "jd_unavailable": jd_unavailable,
         "pdf_path": str(pdf_path),
         "tex_path": str(tex_path),
         "coverage_score": score,
@@ -1800,39 +1815,71 @@ def rebuild_one(job_id, reply_to_message_id=None, mode="fix", instruction=None):
         update_job_status(job_id, "shortlisted")
     return tg_ok, (None if tg_ok else tg_error)
 
+def jd_text_from_raw(raw):
+    """Read captured provider descriptions without fetching or generating facts."""
+    try:
+        data = json.loads(raw) if isinstance(raw, (str, bytes)) else raw
+    except (TypeError, ValueError):
+        return ""
+    if not isinstance(data, dict):
+        return ""
+    parts = []
+    for plain, rich in (("descriptionPlain", "descriptionHtml"), ("descriptionPlainText", "description"), ("", "content")):
+        value = data.get(plain) if plain else None
+        if isinstance(value, str) and value.strip():
+            parts.append(value.strip())
+        elif isinstance(data.get(rich), str) and data[rich].strip():
+            parts.append(html_to_jd_text(html.unescape(data[rich])))
+    # Lever separates the introduction, requirements lists and closing text.
+    for section in data.get("lists", []) if isinstance(data.get("lists"), list) else []:
+        if isinstance(section, dict):
+            heading, content = section.get("text"), section.get("content")
+            if isinstance(heading, str):
+                parts.append(heading)
+            if isinstance(content, str):
+                parts.append(html_to_jd_text(html.unescape(content)))
+    if isinstance(data.get("additional"), str):
+        parts.append(html_to_jd_text(html.unescape(data["additional"])))
+    return "\n\n".join(p for p in parts if p.strip())
+
+
+def jd_metadata(job, text, unavailable):
+    manual = (job.get("manual_jd_text") or "").strip()
+    captured = jd_text_from_raw(job.get("raw"))
+    source = "title_only" if unavailable else "manual" if manual else "captured" if text == captured else "network"
+    return {
+        "source": source, "characters": len(text), "sha256": hashlib.sha256(text.encode()).hexdigest(),
+        "last_seen_at": job.get("last_seen_at") or None,
+        "availability": "missing" if unavailable else "available",
+    }
+
+
 def fetch_jd_text_for_job(job):
-    """Resolve JD text for a job: Greenhouse API first (free, no LLM),
-    then manually-supplied JD text, then the generic HTML-scrape+LLM
-    fallback, then title-only as a last resort. Returns (jd_text,
-    jd_unavailable) -- jd_unavailable is True only for the title-only
-    last resort, so callers can flag verdicts/drafts as unreliable.
-    Shared by process_job (fresh tailoring) and the --outreach CLI path
-    (which needs JD text for a job already tailored earlier).
+    """Use the manual override, captured ATS description, then network fallbacks.
+    Returns (text, unavailable); title-only results cannot support a reliable verdict.
+    Shared by tailoring, rebuilds, and outreach/email drafts.
     """
     company = job.get("company_name") or "Unknown"
     title = job.get("title") or "Unknown"
     url = job.get("url") or ""
 
-    gh_slug = company_slug(company, url)
+    manual = (job.get("manual_jd_text") or "").strip()
+    if manual:
+        return manual, False
+    captured = jd_text_from_raw(job.get("raw"))
+    if len(captured) >= MIN_USABLE_JD_CHARS:
+        return captured, False
+
+    gh_slug = job.get("company_slug") or company_slug(company, url)
     gh_id = extract_gh_job_id(url)
     jd_data = None
     if gh_id and gh_slug:
         jd_data = fetch_greenhouse_job(gh_slug, gh_id)
 
-    manual_jd_text_used = False
-    if not jd_data:
-        manual_jd_text = (job.get("manual_jd_text") or "").strip()
-        if manual_jd_text:
-            jd_data = {
-                "title": title, "company_name": company, "content_text": manual_jd_text,
-                "content_html": "", "location": "", "absolute_url": url,
-            }
-            manual_jd_text_used = True
-
     jd_unavailable = False
     if not jd_data:
         jd_data = fetch_jd_generic(url)
-    if not jd_data or (not manual_jd_text_used and len(jd_data.get("content_text", "")) < MIN_USABLE_JD_CHARS):
+    if not jd_data or len(jd_data.get("content_text", "")) < MIN_USABLE_JD_CHARS:
         jd_unavailable = True
         jd_data = {
             "title": title, "company_name": company, "content_text": title,
@@ -1840,6 +1887,31 @@ def fetch_jd_text_for_job(job):
         }
 
     return jd_data.get("content_text", ""), jd_unavailable
+
+def observe_job_shadow(job, jd_text, jd_unavailable, legacy_judgment=None):
+    """Shadow failures never change the existing tailoring path."""
+    if os.environ.get("JOBWATCH_JEV_SHADOW_ENABLED") != "1":
+        return None
+    try:
+        from production_shadow import observe
+        result = observe(job, jd_text, jd_unavailable, legacy_judgment=legacy_judgment,
+                         db_path=REPO_ROOT / "logs" / "shadow.db", facts_path=FACTS_MD_PATH)
+        log(f"Jev shadow: {result['status']}")
+        return result
+    except Exception:
+        log("WARN: Jev shadow unavailable; continuing existing tailoring")
+        return None
+
+
+def record_job_shadow_legacy(shadow, judgment):
+    if not shadow or not shadow.get("request_hash"):
+        return
+    try:
+        from production_shadow import record_legacy
+        record_legacy(shadow["request_hash"], judgment, db_path=REPO_ROOT / "logs" / "shadow.db")
+    except Exception:
+        log("WARN: Jev shadow comparison unavailable; continuing existing tailoring")
+
 
 def process_job(job, tailored, min_fit=0):
     """Process one job dict from the jobs table: fetch JD (Greenhouse API,
@@ -1861,9 +1933,11 @@ def process_job(job, tailored, min_fit=0):
     jd_text, jd_unavailable = fetch_jd_text_for_job(job)
     if jd_unavailable:
         log(f"WARN: Could not fetch usable JD for {jid}; using title only")
+    shadow = observe_job_shadow(job, jd_text, jd_unavailable)
     jd_data = {"title": title, "content_text": jd_text}
 
     if not is_engineering_role(title, jd_text):
+        record_job_shadow_legacy(shadow, {"verdict": "skipped_non_eng", "source": "existing_filter"})
         log(f"SKIPPED (non-engineering): {title}")
         tailored[jid] = {
             "company": company, "title": title, "url": url,
@@ -1877,6 +1951,7 @@ def process_job(job, tailored, min_fit=0):
         return tailored, "skipped_non_eng"
 
     if exceeds_experience_cap(jd_text):
+        record_job_shadow_legacy(shadow, {"verdict": "skipped_over_experience", "source": "existing_filter"})
         required = max_required_years(jd_text)
         log(f"SKIPPED (over experience cap): {title} (requires {required}+ years)")
         tailored[jid] = {
@@ -1931,6 +2006,7 @@ def process_job(job, tailored, min_fit=0):
 
     if not success:
         log(f"  FAILED after 2 attempts: {(final_error or '')[:200]}")
+        record_job_shadow_legacy(shadow, {"verdict": "tailoring_failed", "source": "existing_pipeline"})
         tailored[jid] = {
             "company": company, "title": title, "url": url,
             "pdf_path": None, "tex_path": str(tex_path) if tex_path.exists() else None,
@@ -1945,6 +2021,7 @@ def process_job(job, tailored, min_fit=0):
     log(f"  Coverage score: {score} ({len(covered)}/{len(jd_keywords)} keywords)")
 
     judgment = llm_judge(jd_text, resume_text, title, company)
+    record_job_shadow_legacy(shadow, judgment)
 
     tailored[jid] = {
         "company": company, "title": title, "url": url,
@@ -1960,6 +2037,7 @@ def process_job(job, tailored, min_fit=0):
         "fit_score": judgment.get("fit_score"), "work_mode": judgment.get("work_mode"),
         "fit_reason": judgment.get("fit_reason", ""),
         "jd_unavailable": jd_unavailable,
+        "jd_metadata": jd_metadata(job, jd_text, jd_unavailable),
     }
     save_tailored(tailored)
     update_job_fit(jid, judgment.get("fit_score"), judgment.get("work_mode"))

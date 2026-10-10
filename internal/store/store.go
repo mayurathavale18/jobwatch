@@ -107,6 +107,7 @@ CREATE TABLE IF NOT EXISTS jobs (
 CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
 CREATE INDEX IF NOT EXISTS idx_jobs_company ON jobs(company_slug);
 CREATE INDEX IF NOT EXISTS idx_jobs_first_seen ON jobs(first_seen_at);
+CREATE INDEX IF NOT EXISTS idx_jobs_similarity ON jobs(lower(trim(company_name)), lower(trim(title)), lower(trim(location)), first_seen_at);
 
 CREATE TABLE IF NOT EXISTS poll_runs (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -116,6 +117,38 @@ CREATE TABLE IF NOT EXISTS poll_runs (
 	companies_failed INTEGER NOT NULL DEFAULT 0,
 	new_jobs INTEGER NOT NULL DEFAULT 0,
 	errors TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS application_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id INTEGER NOT NULL REFERENCES jobs(id),
+    kind TEXT NOT NULL,
+    detail TEXT NOT NULL DEFAULT '',
+    occurred_at TEXT NOT NULL,
+    anchor_id INTEGER REFERENCES application_events(id),
+    UNIQUE(kind, anchor_id)
+);
+CREATE INDEX IF NOT EXISTS idx_application_events_job ON application_events(job_id,id);
+
+CREATE TABLE IF NOT EXISTS job_relations (
+    job_id INTEGER NOT NULL REFERENCES jobs(id),
+    related_job_id INTEGER NOT NULL REFERENCES jobs(id),
+    evidence TEXT NOT NULL,
+    confirmed INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY(job_id, related_job_id),
+    CHECK(job_id > related_job_id)
+);
+
+CREATE TABLE IF NOT EXISTS source_scans (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    poll_run_id INTEGER NOT NULL REFERENCES poll_runs(id),
+    provider TEXT NOT NULL,
+    company_slug TEXT NOT NULL,
+    finished_at TEXT NOT NULL,
+    scope TEXT NOT NULL,
+    fetched INTEGER NOT NULL,
+    status TEXT NOT NULL,
+    error TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS kv (
@@ -162,6 +195,46 @@ CREATE INDEX IF NOT EXISTS idx_connections_company ON connections(company);
 	_, _ = s.db.Exec(`ALTER TABLE jobs ADD COLUMN email_draft_id TEXT NOT NULL DEFAULT ''`)
 	_, _ = s.db.Exec(`ALTER TABLE jobs ADD COLUMN email_to TEXT NOT NULL DEFAULT ''`)
 	_, _ = s.db.Exec(`ALTER TABLE jobs ADD COLUMN email_sent_at TEXT NOT NULL DEFAULT ''`)
+	rows, err := s.db.Query(`PRAGMA table_info(jobs)`)
+	if err != nil {
+		return err
+	}
+	hasLastSeen := false
+	for rows.Next() {
+		var cid, notNull, pk int
+		var name, kind string
+		var defaultValue any
+		if err := rows.Scan(&cid, &name, &kind, &notNull, &defaultValue, &pk); err != nil {
+			rows.Close()
+			return err
+		}
+		hasLastSeen = hasLastSeen || name == "last_seen_at"
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	if !hasLastSeen {
+		if _, err := s.db.Exec(`ALTER TABLE jobs ADD COLUMN last_seen_at TEXT NOT NULL DEFAULT ''`); err != nil {
+			return err
+		}
+	}
+	_, err = s.db.Exec(`
+CREATE TRIGGER IF NOT EXISTS job_status_history AFTER UPDATE OF status ON jobs
+WHEN OLD.status != NEW.status BEGIN
+    INSERT INTO application_events(job_id,kind,detail,occurred_at)
+    VALUES(NEW.id,'status',NEW.status,strftime('%Y-%m-%dT%H:%M:%fZ','now'));
+END;
+CREATE TRIGGER IF NOT EXISTS job_contact_history AFTER UPDATE OF email_sent_at ON jobs
+WHEN NEW.email_sent_at != '' AND OLD.email_sent_at != NEW.email_sent_at BEGIN
+    INSERT INTO application_events(job_id,kind,detail,occurred_at)
+    VALUES(NEW.id,'contact_sent',json_object('to',NEW.email_to),NEW.email_sent_at);
+END;`)
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -310,11 +383,11 @@ func (s *Store) InsertJob(ctx context.Context, tx *sql.Tx, job providers.Job, st
 	}
 
 	res, err := tx.ExecContext(ctx, `
-		INSERT INTO jobs (provider, company_slug, company_name, external_id, title, location, url, posted_at, first_seen_at, status, raw, manual_jd_text, manual_outreach_instruction)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		INSERT INTO jobs (provider, company_slug, company_name, external_id, title, location, url, posted_at, first_seen_at, status, raw, manual_jd_text, manual_outreach_instruction, last_seen_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		job.Provider, job.CompanySlug, job.CompanyName, job.ExternalID,
 		job.Title, job.Location, job.URL, postedAt,
-		job.FirstSeenAt.UTC().Format(time.RFC3339), status, string(raw), job.JDText, job.OutreachInstruction,
+		job.FirstSeenAt.UTC().Format(time.RFC3339), status, string(raw), job.JDText, job.OutreachInstruction, time.Now().UTC().Format(time.RFC3339),
 	)
 	if err != nil {
 		return 0, err

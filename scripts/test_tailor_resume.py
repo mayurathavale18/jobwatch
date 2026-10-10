@@ -600,6 +600,8 @@ def test_significant_words_strips_latex_markup():
 
 def test_process_job_skips_non_engineering_role(monkeypatch, tmp_path):
     monkeypatch.setattr(tr, "TAILORED_JSON_PATH", tmp_path / "tailored.json")
+    monkeypatch.setattr(tr, "fetch_jd_text_for_job", lambda job: ("Account Executive", False))
+    monkeypatch.setattr(tr, "update_job_status", lambda job_id, status: None)
     job = {"id": 1, "company_name": "Acme", "title": "Account Executive", "url": "https://example.com/1"}
     tailored, outcome = tr.process_job(job, {})
     assert outcome == "skipped_non_eng"
@@ -619,6 +621,44 @@ def test_is_engineering_role_still_blocks_hr_titles():
 
 def test_is_engineering_role_still_blocks_legal_titles():
     assert tr.is_engineering_role("Corporate Counsel", "") is False
+
+
+def test_engineering_title_survives_cross_functional_and_legal_boilerplate():
+    assert tr.is_engineering_role(
+        "Backend Engineer",
+        "Collaborate with marketing and HR; applicants must have the legal right to work.",
+    ) is True
+
+
+def test_required_experience_does_not_include_preferred_sentence():
+    assert tr.max_required_years(
+        "Required: 2 years of experience. Preferred: 5 years of experience."
+    ) == 2
+
+
+def test_required_experience_does_not_include_preferred_section():
+    assert tr.max_required_years(
+        "Requirements:\n2 years of experience\nPreferred qualifications:\n5 years of experience"
+    ) == 2
+
+
+def test_experience_requirement_after_preferred_section_is_checked():
+    assert tr.max_required_years(
+        "Nice-to-have:\n5 years of experience\nMinimum requirements:\n4 years of experience"
+    ) == 4
+
+
+def test_preferred_experience_suffix_is_not_mandatory():
+    assert tr.max_required_years("5 years of experience preferred.") is None
+
+
+@pytest.mark.parametrize("jd,expected", [
+    ("Requirements:\n2 years of experience\nPreferred qualifications\n5 years of experience", 2),
+    ("Required: 2 years of experience, preferred: 5 years of experience", 2),
+    ("Preferred qualifications:\n5 years of experience\nWhat you bring\n4 years of experience", 4),
+])
+def test_experience_review_regressions(jd, expected):
+    assert tr.max_required_years(jd) == expected
 
 
 def test_max_required_years_plus_pattern():
@@ -813,7 +853,7 @@ def test_rebuild_one_uses_manual_jd_text_from_db(monkeypatch, tmp_path):
     monkeypatch.setattr(tr, "OUTPUT_ROOT", tmp_path / "out")
 
     tr.save_tailored({
-        "1": {"company": "Stripe", "title": "Backend Engineer", "url": "https://stripe.com/jobs/1", "status": "done"},
+        "1": {"company": "Stripe", "title": "Backend Engineer", "url": "https://stripe.com/jobs/1", "status": "done", "jd_metadata": {"sha256": "old hash"}},
     })
 
     captured_jd_data = {}
@@ -836,6 +876,11 @@ def test_rebuild_one_uses_manual_jd_text_from_db(monkeypatch, tmp_path):
     assert captured_jd_data["content_text"] == "We need a backend engineer with Go, Kubernetes, and PostgreSQL experience."
 
 
+    updated = tr.load_tailored()["1"]
+    assert updated["jd_metadata"]["source"] == "manual"
+    assert updated["jd_metadata"]["sha256"] != "old hash"
+    assert updated["jd_unavailable"] is False
+
 def test_rebuild_one_whitespace_only_manual_jd_text_falls_through_to_title(monkeypatch, tmp_path):
     tailored_path = tmp_path / "tailored.json"
     monkeypatch.setattr(tr, "TAILORED_JSON_PATH", tailored_path)
@@ -853,9 +898,10 @@ def test_rebuild_one_whitespace_only_manual_jd_text_falls_through_to_title(monke
     monkeypatch.setattr(tr, "OUTPUT_ROOT", tmp_path / "out")
 
     tr.save_tailored({
-        "1": {"company": "Stripe", "title": "Backend Engineer", "url": "https://stripe.com/jobs/1", "status": "done"},
+        "1": {"company": "Stripe", "title": "Backend Engineer", "url": "https://stripe.com/jobs/1", "status": "done", "jd_metadata": {"sha256": "stale"}, "jd_unavailable": False},
     })
 
+    monkeypatch.setattr(tr, "fetch_jd_generic", lambda url: None)
     captured_jd_data = {}
 
     def fake_build_resume_fields(job, jd_data, tight=False):
@@ -875,6 +921,11 @@ def test_rebuild_one_whitespace_only_manual_jd_text_falls_through_to_title(monke
     assert ok is True
     assert captured_jd_data["content_text"] == "Backend Engineer"
 
+
+    updated = tr.load_tailored()["1"]
+    assert updated["jd_metadata"]["source"] == "title_only"
+    assert updated["jd_metadata"]["sha256"] != "stale"
+    assert updated["jd_unavailable"] is True
 
 def test_send_telegram_caption_includes_verdict_and_missing(monkeypatch, tmp_path):
     monkeypatch.setattr(tr, "TG_TOKEN", "fake-token")
@@ -1572,3 +1623,70 @@ def test_process_job_null_fit_is_never_gated(monkeypatch, tmp_path):
     statuses, sends = _patch_process_job_pipeline(monkeypatch, tmp_path, fit_score=None)
     tailored, outcome = tr.process_job(_jd_job(9), {}, min_fit=45)
     assert outcome == "sent"
+
+
+@pytest.mark.parametrize("raw", [
+    {"content": "<p>" + "Required Go experience. " * 30 + "</p>"},
+    {"descriptionPlainText": "Required Go experience. " * 30},
+    {"descriptionPlain": "Required Go experience. " * 30, "lists": [{"text": "Requirements", "content": "<li>Kubernetes</li>"}]},
+])
+def test_captured_jd_avoids_network(raw, monkeypatch):
+    def unexpected(*args):
+        raise AssertionError("captured JD should avoid network")
+    monkeypatch.setattr(tr, "fetch_greenhouse_job", unexpected)
+    monkeypatch.setattr(tr, "fetch_jd_generic", unexpected)
+    text, unavailable = tr.fetch_jd_text_for_job({"raw": json.dumps(raw), "url": "https://example.com"})
+    assert "Required Go experience" in text
+    assert not unavailable
+
+
+def test_manual_jd_overrides_captured_and_greenhouse(monkeypatch):
+    monkeypatch.setattr(tr, "fetch_greenhouse_job", lambda *args: pytest.fail("network used"))
+    text, unavailable = tr.fetch_jd_text_for_job({"manual_jd_text": "My override", "raw": json.dumps({"content": "other" * 100}), "url": "https://boards.greenhouse.io/example?gh_jid=123"})
+    assert (text, unavailable) == ("My override", False)
+
+
+@pytest.mark.parametrize("raw", [None, "{bad", "[]", "null", {"content": 42}])
+def test_captured_jd_invalid_data_is_empty(raw):
+    assert tr.jd_text_from_raw(raw) == ""
+
+
+def test_lever_requirement_lists_and_entities():
+    text = tr.jd_text_from_raw({"descriptionHtml": "&lt;p&gt;Build APIs&lt;/p&gt;", "lists": [{"text": "Requirements", "content": "<li>Go &amp; SQL</li>"}], "additional": "<p>Remote</p>"})
+    assert "Build APIs" in text
+    assert "Requirements" in text
+    assert "Go & SQL" in text
+    assert "Remote" in text
+
+
+def test_jd_metadata_distinguishes_unknown_freshness_and_missing():
+    text = "Required Go experience. " * 30
+    meta = tr.jd_metadata({"raw": json.dumps({"descriptionPlain": text})}, text.strip(), False)
+    assert meta["source"] == "captured"
+    assert meta["last_seen_at"] is None
+    assert len(meta["sha256"]) == 64
+    assert tr.jd_metadata({}, "Engineer", True)["availability"] == "missing"
+
+
+def test_shadow_failure_does_not_change_existing_low_fit_gate(monkeypatch, tmp_path):
+    import production_shadow
+    statuses, sends = _patch_process_job_pipeline(monkeypatch, tmp_path, fit_score=20)
+    monkeypatch.setenv("JOBWATCH_JEV_SHADOW_ENABLED", "1")
+    monkeypatch.setattr(production_shadow, "observe", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("private-key-value")))
+    logs = []
+    monkeypatch.setattr(tr, "log", logs.append)
+    _, outcome = tr.process_job(_jd_job(70), {}, min_fit=45)
+    assert outcome == "skipped_low_fit" and statuses == ["ignored"] and sends == []
+    assert "private-key-value" not in " ".join(logs)
+
+
+def test_shadow_observes_before_experience_filter_without_overriding_it(monkeypatch, tmp_path):
+    statuses, sends = _patch_process_job_pipeline(monkeypatch, tmp_path, fit_score=90)
+    calls = []
+    monkeypatch.setattr(tr, "observe_job_shadow", lambda *a: (calls.append("observe"), {"request_hash": "hash", "label": "strong_match"})[1])
+    monkeypatch.setattr(tr, "record_job_shadow_legacy", lambda shadow, judgment: calls.append(judgment["verdict"]))
+    monkeypatch.setattr(tr, "exceeds_experience_cap", lambda _: True)
+    monkeypatch.setattr(tr, "max_required_years", lambda _: 5)
+    _, outcome = tr.process_job(_jd_job(71), {})
+    assert calls == ["observe", "skipped_over_experience"]
+    assert outcome == "skipped_over_experience" and statuses == ["ignored"] and sends == []

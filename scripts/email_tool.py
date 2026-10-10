@@ -18,7 +18,7 @@ blank To: field for Mayur to fill in manually.
 import json
 import sqlite3
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.request import Request, urlopen
 
@@ -225,7 +225,7 @@ def send(req):
             resp.read()
     except Exception as e:
         return {"ok": False, "error": str(e)}
-    set_email_fields(job_id, sent_at=datetime.now().isoformat())
+    set_email_fields(job_id, sent_at=datetime.now(timezone.utc).isoformat())
     return {"ok": True}
 
 

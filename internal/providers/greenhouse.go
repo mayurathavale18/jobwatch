@@ -26,7 +26,7 @@ func NewGreenhouse(client *http.Client) *Greenhouse {
 }
 
 type ghResponse struct {
-	Jobs []ghJob `json:"jobs"`
+	Jobs []json.RawMessage `json:"jobs"`
 }
 
 type ghJob struct {
@@ -76,10 +76,11 @@ func parseGreenhouseJSON(data []byte, company config.Company) ([]Job, error) {
 func parseGreenhouse(body ghResponse, company config.Company) ([]Job, error) {
 	now := time.Now().UTC()
 	jobs := make([]Job, 0, len(body.Jobs))
-	for _, j := range body.Jobs {
-		raw, err := json.Marshal(j)
+	for _, raw := range body.Jobs {
+		var j ghJob
+		err := json.Unmarshal(raw, &j)
 		if err != nil {
-			return nil, fmt.Errorf("greenhouse %s: marshal raw: %w", company.Slug, err)
+			return nil, fmt.Errorf("greenhouse %s: decode posting: %w", company.Slug, err)
 		}
 
 		var postedAt *time.Time

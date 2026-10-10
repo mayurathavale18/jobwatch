@@ -19,12 +19,9 @@ const (
 	// (~1s each) per company, well past what a single Greenhouse/Lever/Ashby
 	// request needs -- sized for that instead of the single-request case.
 	requestTimeout = 60 * time.Second
-	// fuzzyDedupWindow bounds how far back ExistsFuzzyTx looks for a
-	// same-posting match from a different provider. 30 days comfortably
-	// covers the gap between a job going live on a company's own board and
-	// a search aggregator indexing it, without matching against a job
-	// reposted under the same title months later.
-	fuzzyDedupWindow = 30 * 24 * time.Hour
+	// Similar titles can describe distinct requisitions; link recent candidates
+	// for review instead of silently deleting one source record.
+	similarityWindow = 30 * 24 * time.Hour
 )
 
 // Notifier is the subset of *notify.Telegram the poller needs, so tests can
@@ -65,6 +62,7 @@ type companyOutcome struct {
 	errMsg   string
 	inserted []providers.Job // jobs that passed filters (candidates for notification)
 	newCount int
+	fetched  int
 }
 
 // Run polls every configured company concurrently (bounded to maxConcurrency
@@ -98,6 +96,16 @@ func (p *Poller) Run(ctx context.Context, backfill bool) (Result, error) {
 	var toNotify []providers.Job
 	for i, o := range outcomes {
 		company := p.Config.Companies[i]
+		scope := "board_snapshot"
+		switch company.Provider {
+		case "workday":
+			scope = "bounded_pages"
+		case "web3career", "remoteok", "wwr", "remotive":
+			scope = "feed_unknown_coverage"
+		}
+		if err := p.Store.RecordSourceScan(ctx, runID, company.Provider, company.Slug, scope, o.fetched, o.errMsg); err != nil {
+			result.Errors = append(result.Errors, fmt.Sprintf("record source scan: %v", err))
+		}
 		if o.ok {
 			result.CompaniesOK++
 		} else {
@@ -143,7 +151,7 @@ func (p *Poller) pollCompany(ctx context.Context, company config.Company, backfi
 
 	tx, err := p.Store.BeginTx(ctx)
 	if err != nil {
-		return companyOutcome{ok: false, errMsg: fmt.Sprintf("begin tx: %v", err)}
+		return companyOutcome{ok: false, errMsg: fmt.Sprintf("begin tx: %v", err), fetched: len(jobs)}
 	}
 	defer tx.Rollback() //nolint:errcheck // no-op if already committed
 
@@ -153,19 +161,12 @@ func (p *Poller) pollCompany(ctx context.Context, company config.Company, backfi
 	for _, job := range jobs {
 		exists, err := p.Store.ExistsTx(ctx, tx, job.Provider, job.CompanySlug, job.ExternalID)
 		if err != nil {
-			slog.Error("checking dedupe", "company", company.Name, "external_id", job.ExternalID, "error", err)
-			continue
+			return companyOutcome{errMsg: fmt.Sprintf("checking dedupe: %v", err), fetched: len(jobs)}
 		}
 		if exists {
-			continue
-		}
-
-		fuzzyExists, err := p.Store.ExistsFuzzyTx(ctx, tx, job.CompanyName, job.Title, job.Location, time.Now().Add(-fuzzyDedupWindow))
-		if err != nil {
-			slog.Error("checking fuzzy dedupe", "company", job.CompanyName, "title", job.Title, "error", err)
-			continue
-		}
-		if fuzzyExists {
+			if err := p.Store.RefreshJobTx(ctx, tx, job); err != nil {
+				return companyOutcome{errMsg: fmt.Sprintf("refresh job: %v", err), fetched: len(jobs)}
+			}
 			continue
 		}
 
@@ -177,8 +178,11 @@ func (p *Poller) pollCompany(ctx context.Context, company config.Company, backfi
 
 		id, err := p.Store.InsertJob(ctx, tx, job, status)
 		if err != nil {
-			slog.Error("inserting job", "company", company.Name, "external_id", job.ExternalID, "error", err)
-			continue
+			return companyOutcome{errMsg: fmt.Sprintf("inserting job: %v", err), fetched: len(jobs)}
+		}
+
+		if err := p.Store.LinkSimilarJobsTx(ctx, tx, id, job, time.Now().Add(-similarityWindow)); err != nil {
+			return companyOutcome{errMsg: fmt.Sprintf("link similar jobs: %v", err), fetched: len(jobs)}
 		}
 
 		newCount++
@@ -189,8 +193,8 @@ func (p *Poller) pollCompany(ctx context.Context, company config.Company, backfi
 	}
 
 	if err := tx.Commit(); err != nil {
-		return companyOutcome{ok: false, errMsg: fmt.Sprintf("commit tx: %v", err)}
+		return companyOutcome{ok: false, errMsg: fmt.Sprintf("commit tx: %v", err), fetched: len(jobs)}
 	}
 
-	return companyOutcome{ok: true, inserted: inserted, newCount: newCount}
+	return companyOutcome{ok: true, inserted: inserted, newCount: newCount, fetched: len(jobs)}
 }
