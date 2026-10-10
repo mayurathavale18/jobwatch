@@ -79,3 +79,63 @@ def test_evaluation_rejects_changed_rubric():
     prediction["rubric_sha256"] = "different"
     with pytest.raises(ValueError,match="rubric"):
         rs.evaluate([normal],[prediction],"Profile")
+
+
+def packet_case():
+    profile = "Built Python APIs and durable queues in production."
+    posting = case()
+    posting["state"]["jd"] = "Build Python APIs and durable queues."
+    packet = {"id": posting["id"], "selection_version": 1, "state_sha256": rs.digest(json.dumps(posting["state"], sort_keys=True)),
+              "profile_sha256": rs.digest(profile), "candidate_evidence": [profile],
+              "posting_evidence": [posting["state"]["jd"]]}
+    return posting, packet, profile
+
+
+class FitAgent(Agent):
+    def predict(self, state, questions):
+        assert questions == rs.FIT_QUESTION
+        assert set(state) == {"candidate_evidence", "posting_evidence"}
+        return {"answers": {"responsibility_fit": {"choice": "strong_match", "answer_confidence": 0.8}}}
+
+
+def test_packets_are_advisory_and_require_exact_frozen_evidence():
+    posting, packet, profile = packet_case()
+    result = rs.infer_packets(FitAgent(), [packet], [posting], profile)[0]
+    assert result["label"] == "strong_match"
+    assert result["advisory_only"] is True
+    assert result["scope"] == "selected_responsibilities_only"
+    packet["candidate_evidence"] = ["Invented ten years of experience"]
+    with pytest.raises(ValueError, match="exact source"):
+        rs.infer_packets(FitAgent(), [packet], [posting], profile)
+
+
+def test_packets_reject_changed_profile_posting_and_duplicate_ids():
+    posting, packet, profile = packet_case()
+    with pytest.raises(ValueError, match="profile"):
+        rs.validate_packets([packet], [posting], profile + "changed")
+    with pytest.raises(ValueError, match="Duplicate"):
+        rs.validate_packets([packet, packet], [posting], profile)
+    posting["state"]["jd"] += "changed"
+    with pytest.raises(ValueError, match="changed"):
+        rs.validate_packets([packet], [posting], profile)
+
+
+def test_packet_budget_never_truncates_or_executes_model():
+    posting, packet, profile = packet_case()
+    class NoPrediction(FitAgent):
+        cfg = {"max_len": 200, "head_max_len": 192}
+        def predict(self, *args):
+            raise AssertionError("Over-budget packet must abstain")
+    result = rs.infer_packets(NoPrediction(), [packet], [posting], profile)[0]
+    assert result["abstained"] is True
+    assert result["reason"] == "context_budget_exceeded"
+
+
+@pytest.mark.parametrize("confidence", [True, float("nan"), -1, 1.1, "0.8"])
+def test_packet_output_validation(confidence):
+    posting, packet, profile = packet_case()
+    class BadAgent(FitAgent):
+        def predict(self, *args):
+            return {"answers": {"responsibility_fit": {"choice": "strong_match", "answer_confidence": confidence}}}
+    with pytest.raises(ValueError, match="Invalid"):
+        rs.infer_packets(BadAgent(), [packet], [posting], profile)

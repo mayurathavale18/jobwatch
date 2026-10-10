@@ -130,6 +130,38 @@ Before production model decisions: obtain representative human-labelled jobs, co
 
 ## Validation and deployment boundary
 
+### Evidence-backed shadow decisions (11 October 2026)
+
+`scripts/job_decision.py` is a separate local path. It records exact requirement excerpts and produces `apply`, `review` or `skip`; these are candidate recommendations, never actions. They are not interchangeable with the older classifier's `prioritize/review/reject` labels. The production Go filter and tailoring experience cap remain unchanged.
+
+The conservative English extractor preserves requirement clauses and required/preferred/unknown strength. It retains specialty wording in the evidence rather than inventing structured domain expertise. Title evidence establishes occupation; JD mentions of engineers do not turn an accounting/design role into an engineering role. The parser is a heuristic, not a complete semantic extractor. Uncertain requirements and unconfirmed country eligibility or annual cash lead to review. Human-reviewed interpretations must retain their evidence. Preferred experience and responsibilities still need deliberate assessment; the script does not establish recruiter flexibility.
+
+```powershell
+python scripts/job_decision.py cases.json candidate-constraints.json decisions.json
+```
+
+Use a frozen structured candidate file and inspect the extraction/output before relying on recommendations. Keep labels independently human-authored; diagnostic recommendations are not gold labels. This command does not read the jobs database, load credentials, send alerts or apply to jobs.
+
+Candidate fields are `experience_years`, `country`, `facts` (frozen source text), `minimum_annual_cash` (currency-to-floor mapping) and `cash_basis`. Current constraints are 1.75 years, India, INR 2,500,000 / USD 35,000 annual targets. Their fixed/base/CTC split is unspecified, so the diagnostic candidate sets `cash_basis: null`; do not silently call these fixed-pay thresholds.
+
+An optional case `human_review` records `skill_match`, `skill_match_confirmed`, `skill_evidence` (exact JD excerpt), `candidate_skill_evidence` (exact facts excerpt), `location_eligible`, `location_evidence`, `salary_evidence` and `annual_cash` (`minimum`, `maximum`, `currency`, `period`, `basis`). These fields are explicit human interpretations, not model-derived facts. Positive skill evidence does not establish completeness; the reviewer must inspect the full role. Location eligibility is deliberately human-confirmed: neither a remote header nor generic global-company prose grants India hiring permission automatically.
+
+The cash validator currently supports only an unambiguous literal annual base/fixed quote, such as the **synthetic** `Annual base salary USD 40000-50000.`; numeric values, currency, period and basis must agree. Other formats, conversion needs and unmatched candidate cash basis remain review. This limits coverage deliberately: it does not parse every real compensation layout. A range crossing the floor remains review; only a confirmed comparable upper bound below the floor supports skip. Preferred experience above candidate years also remains review. `apply` requires all these checks plus confirmed skills and no unresolved requirement; it still means a recommendation, not submission.
+
+### Narrow Laya responsibility packets
+
+`rank_shadow.py infer-packets` compares selected responsibilities with selected candidate facts. Each packet contains `id`, `selection_version: 1`, `state_sha256`, `profile_sha256`, `candidate_evidence` and `posting_evidence`. Both evidence fields are nonempty arrays of exact excerpts from the frozen profile and JD respectively. Hashes use the existing shadow adapter's canonical JSON/source hashing. Selection is explicit; no automatic truncation or full-profile replacement occurs.
+
+```powershell
+& '../laya-test/.venv/Scripts/python.exe' scripts/rank_shadow.py infer-packets --cases cases.json --packets packets.json --profile candidate-profile.txt --checkpoint 'C:/path/to/cached/checkpoint' --out packet-predictions.json
+```
+
+Outputs are `strong_match`, `partial_match` or `insufficient_evidence`, bound to selected evidence, source/profile hashes and rubric hash. They are advisory about the selected responsibilities only. A strong match cannot establish pay, work authorization, country hiring, complete skill coverage or experience eligibility; it cannot override an evidence-backed skip. Missing excerpts are rejected before loading the model, and over-budget packets abstain without a forward pass. There is no automatic connection from these predictions to the recommendation engine or production pipeline.
+
+The old `evaluate` command intentionally accepts only its original label schema. Packet correctness requires separately human-labelled responsibility comparisons, not translating an assistant's suggestions into supposedly independent labels. The diagnostic example packets under local `reports/` contain private candidate facts and are not intended for public commits.
+
+Local packet smoke on 11 October 2026 used the same cached Laya 0.3.28 checkpoint, CPU and one thread. Two assistant-selected diagnostic packets contained 64 and 144 state tokens; both ran within the 316-token conservative budget. Load took 11.33 seconds, and forward passes took approximately 2.29 and 3.01 seconds. Both returned `strong_match`; these outputs are not independently labelled correctness or calibrated confidence. Exact excerpts prevent invented evidence, but selection can bias the result. Process RSS and Contabo performance remain unmeasured; parameter tensors alone occupy about 1.57 GiB.
+
 Each of the seven steps received independent read-only review, with identified blockers fixed before progressing. Final local verification: 151 Python tests passed, the full `go test ./...` suite passed in an isolated Linux container with the real existing frontend output, and an integrated disposable database exercise passed preview/import/idempotency/report/timeline/follow-up/export assertions. Python regression tests cover eligibility, captured descriptions, provenance, local workflow and shadow evaluation. Go tests cover capture, migrations, refreshes, identity, imports and application history.
 
 Changes have not been pushed to master or deployed. Master pushes auto-deploy. No live polling, Telegram consumption, account scraping, Gmail writes or recruiter messages were performed during implementation. The operations commands are CLI workflows; no new dashboard screens, email-alert parser or employer-board crawler were added.
