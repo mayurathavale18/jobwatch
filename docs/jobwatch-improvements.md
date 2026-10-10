@@ -179,3 +179,26 @@ The local six-case pack in `reports/human-review-20261011/` has exact frozen exc
 Each of the seven steps received independent read-only review, with identified blockers fixed before progressing. Final local verification: 151 Python tests passed, the full `go test ./...` suite passed in an isolated Linux container with the real existing frontend output, and an integrated disposable database exercise passed preview/import/idempotency/report/timeline/follow-up/export assertions. Python regression tests cover eligibility, captured descriptions, provenance, local workflow and shadow evaluation. Go tests cover capture, migrations, refreshes, identity, imports and application history.
 
 Changes have not been pushed to master or deployed. Master pushes auto-deploy. No live polling, Telegram consumption, account scraping, Gmail writes or recruiter messages were performed during implementation. The operations commands are CLI workflows; no new dashboard screens, email-alert parser or employer-board crawler were added.
+
+
+### Requirement evidence ledger and compact challengers (11 October 2026)
+
+`evidence_ledger.py` preserves reviewed, exact JD clauses and atomic capability excerpts, then retrieves up to three related facts per capability. Each fact retains its exact text, source line, headings, source hash, explicitly stated knowledge level and unresolved qualifiers. Retrieval is lexical with a small alias table: related evidence is not proof. Unlabelled facts retain `unknown` level. Missing matches can be retrieval misses, rather than missing skills.
+
+Requirements are a JSON array of `{"id":"case-id","clauses":[{"evidence":"exact JD excerpt","capabilities":["exact substring within that excerpt"]}]}`. Omitting capabilities uses the full clause. These inputs are deliberately reviewed selections; this step does not automatically understand every responsibility in a new JD. Source changes, invented excerpts and altered retrieval results fail validation before inference.
+
+```powershell
+python scripts/evidence_ledger.py --cases cases.json --facts facts.md --requirements requirements.json --out ledger.json
+python scripts/classifier_shadow.py --mode classify --ledger ledger.json --cases cases.json --facts facts.md --checkpoint 'C:/path/to/gliclass/snapshot' --out role-predictions.json
+python scripts/classifier_shadow.py --mode support --ledger ledger.json --cases cases.json --facts facts.md --checkpoint 'C:/path/to/nli/snapshot' --out support-predictions.json
+```
+
+The challenger requires existing local checkpoints and outputs a new file. It uses CPU/one PyTorch thread, offline loading and complete-input token counting without truncation. GLiClass uses the inspected uni-encoder library framing, including role labels and prompt. NLI verifies the checkpoint's declared entailment/neutral/contradiction mapping. Unresolved facts, missing retrieval and oversized input abstain. Neutral means support is not established; it cannot reject a job.
+
+The local experiment used `knowledgator/gliclass-instruct-edge-v1.0` revision `727be8a417f6a7718e591b025e07054c146d8139` and `cross-encoder/nli-deberta-v3-small` revision `fa2804872c3b4bd748f38c0185cc85775361e735`. Public checkpoint weights were downloaded explicitly during setup; inference itself is offline. Existing benchmark environment: Python 3.14.6, torch 2.14.1, transformers 5.18.0. GLiClass 0.1.20, sentencepiece 0.2.2 and psutil 7.2.2 were installed into a separate local benchmark dependency directory, leaving the Laya environment unchanged. Set child-process PYTHONPATH to that directory if reproducing that setup; these packages are not production dependencies.
+
+GLiClass's six role-family labels and NLI's single-fact/capability judgments are different tasks from the earlier responsibility S/P/I rubric. Their scores are uncalibrated. An entailment score for a technology name cannot establish specialist implementation or complete responsibility coverage. Models can return spurious entailment and contradiction even for exact source excerpts. No output changes facts, resumes, eligibility, production filtering or application decisions.
+
+The 16 previously inspected cases are diagnostic regression inputs, not fresh holdout data. The local ledger contains 133 fact lines and 49 capability selections, with ten retrieval misses and 93 retrieved pairs. Private run artifacts and runtime measurements remain under `reports/evidence-ledger-20261011/`; candidate facts are not public source artifacts. Production hardware capacity and model quality remain separate completion gates.
+
+Real CPU smoke runs completed for both checkpoints. Corrected process-tree sampling on Windows measured about 505 MiB RSS for GLiClass and 1216 MiB for NLI; the latter exceeds a 1 GiB budget in this environment. These are laptop measurements, not deployment sizing guarantees. NLI produced spurious entailment for managing direct reports from unrelated integration evidence, so its output remains diagnostic. The full Python suite now passes 227 tests.
