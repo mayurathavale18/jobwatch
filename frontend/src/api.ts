@@ -1,4 +1,5 @@
 export interface Job {
+  application?: PlatformApplication
   id: number
   companySlug: string
   companyName: string
@@ -18,6 +19,50 @@ export interface Job {
   emailDraftId: string
   emailTo: string
   emailSentAt: string
+}
+
+export interface ApplicationContact {
+  name: string
+  email: string
+  role: string
+  evidence: string
+}
+
+export interface PlatformApplication {
+  platform: string
+  sourceId: string
+  company: string
+  title: string
+  location: string
+  url: string
+  appliedAt: string
+  sourceStatus: string
+  jd: string
+  contacts: ApplicationContact[] | null
+  metadata: Record<string, string> | null
+  jobId: number
+  importedAt: string
+  draftSubject: string
+  draftBody: string
+  draftLink: string
+  emailTo: string
+  emailDraftId: string
+  emailSentAt: string
+  jobStatus: string
+}
+
+export async function fetchApplications(platform = ''): Promise<PlatformApplication[]> {
+  const res = await fetch(`/api/applications?platform=${encodeURIComponent(platform)}`)
+  if (!res.ok) throw new Error(await res.text())
+  return (await res.json()).applications
+}
+
+export async function importApplications(payload: string): Promise<number> {
+  const res = await fetch('/api/applications/import', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: payload,
+  })
+  if (!res.ok) throw new Error(await res.text())
+  return (await res.json()).imported
 }
 
 export interface Connection {
@@ -55,7 +100,7 @@ export async function uploadConnections(csv: string): Promise<number> {
 }
 
 export interface EmailActionRequest {
-  action: 'generate' | 'revise' | 'save_draft' | 'send'
+  action: 'generate' | 'revise' | 'save_draft' | 'save_local' | 'send'
   to?: string
   toName?: string
   subject?: string

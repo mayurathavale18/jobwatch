@@ -14,25 +14,26 @@ import (
 )
 
 type apiJob struct {
-	ID                int64  `json:"id"`
-	CompanySlug       string `json:"companySlug"`
-	CompanyName       string `json:"companyName"`
-	Title             string `json:"title"`
-	Location          string `json:"location"`
-	URL               string `json:"url"`
-	PostedAt          string `json:"postedAt"`
-	FirstSeenAt       string `json:"firstSeenAt"`
-	Status            string `json:"status"`
-	Notes             string `json:"notes"`
-	OutreachStatus    string `json:"outreachStatus"`
-	FounderName       string `json:"founderName"`
-	FounderEmail      string `json:"founderEmail"`
-	OutreachDraftedAt string `json:"outreachDraftedAt"`
-	FitScore          *int64 `json:"fitScore"`
-	WorkMode          string `json:"workMode"`
-	EmailDraftID      string `json:"emailDraftId"`
-	EmailTo           string `json:"emailTo"`
-	EmailSentAt       string `json:"emailSentAt"`
+	Application       *store.PlatformApplication `json:"application,omitempty"`
+	ID                int64                      `json:"id"`
+	CompanySlug       string                     `json:"companySlug"`
+	CompanyName       string                     `json:"companyName"`
+	Title             string                     `json:"title"`
+	Location          string                     `json:"location"`
+	URL               string                     `json:"url"`
+	PostedAt          string                     `json:"postedAt"`
+	FirstSeenAt       string                     `json:"firstSeenAt"`
+	Status            string                     `json:"status"`
+	Notes             string                     `json:"notes"`
+	OutreachStatus    string                     `json:"outreachStatus"`
+	FounderName       string                     `json:"founderName"`
+	FounderEmail      string                     `json:"founderEmail"`
+	OutreachDraftedAt string                     `json:"outreachDraftedAt"`
+	FitScore          *int64                     `json:"fitScore"`
+	WorkMode          string                     `json:"workMode"`
+	EmailDraftID      string                     `json:"emailDraftId"`
+	EmailTo           string                     `json:"emailTo"`
+	EmailSentAt       string                     `json:"emailSentAt"`
 }
 
 func toAPIJob(j store.JobRow) apiJob {

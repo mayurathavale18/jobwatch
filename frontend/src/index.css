@@ -2,6 +2,15 @@
   color-scheme: light dark;
 }
 
+.application-card, .application-import { border: 1px solid var(--border); padding: 1rem; margin: 1rem 0; }
+.application-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+.application-heading h3 { margin: 0; }
+.application-card details { margin-top: 1rem; }
+.captured-jd { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.6; margin-top: 1rem; }
+.contact-evidence { display: block; color: var(--muted); margin: .3rem 0 .7rem; }
+.application-import textarea { display: block; width: 100%; box-sizing: border-box; margin: .5rem 0; }
+.applications-page .filters input { min-width: 260px; }
+
 @media (prefers-color-scheme: dark) {
   :root {
     --bg: #0a1612;

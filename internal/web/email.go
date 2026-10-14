@@ -165,7 +165,16 @@ func (s *Server) handleAPIJobGet(w http.ResponseWriter, r *http.Request) {
 		httpError(w, "loading job", err)
 		return
 	}
-	writeJSON(w, toAPIJob(job))
+	out := toAPIJob(job)
+	apps, err := s.store.Applications(r.Context(), "", id)
+	if err != nil {
+		httpError(w, "loading application context", err)
+		return
+	}
+	if len(apps) > 0 {
+		out.Application = &apps[0]
+	}
+	writeJSON(w, out)
 }
 
 // emailToolScript mirrors tailorOneScript's repo-root-relative convention.
@@ -207,6 +216,13 @@ func (s *Server) handleAPIJobEmail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch req.Action {
+	case "save_local":
+		if err := s.store.SaveApplicationDraft(r.Context(), id, req.To, req.Subject, req.Body); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		writeJSON(w, map[string]any{"ok": true})
+		return
 	case "generate", "revise", "save_draft", "send":
 	default:
 		http.Error(w, "invalid action", http.StatusBadRequest)

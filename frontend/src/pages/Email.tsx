@@ -20,6 +20,15 @@ export default function Email({ jobId }: { jobId: number }) {
         setJob(j)
         setTo(j.emailTo || j.founderEmail || '')
         setDraftId(j.emailDraftId || '')
+        const application = j.application
+        if (application) {
+          const contact = application.contacts?.find(c => c.email) || application.contacts?.[0]
+          setTo(j.emailTo || contact?.email || '')
+          setToName(contact?.name || '')
+          setSubject(application.draftSubject)
+          setBody(application.draftBody)
+          setDraftLink(application.draftLink)
+        }
       })
       .catch((e) => setMsg(String(e)))
     fetchReferrals(jobId).then(setReferrals).catch(() => setReferrals([]))
@@ -99,8 +108,9 @@ export default function Email({ jobId }: { jobId: number }) {
   return (
     <div className="email-page">
       <p>
-        <a href="/">← Jobs</a>
+        <a href={job.application ? '/applications' : '/'}>← {job.application ? 'Applications' : 'Jobs'}</a>
       </p>
+
       <h2>
         {job.companyName} — {job.title}
       </h2>
@@ -112,6 +122,15 @@ export default function Email({ jobId }: { jobId: number }) {
         </a>
         {job.emailSentAt && ` · sent ${job.emailSentAt}`}
       </p>
+
+      {job.application && <section>
+        <h3>{job.application.platform} application</h3>
+        <p>{job.application.sourceStatus} · Applied {job.application.appliedAt || 'date not shown'}</p>
+        {job.application.contacts?.map((c, i) => <p key={i}>{c.name} · {c.role} · {c.email || 'Email not provided'}{' '}
+          {c.email && <button type="button" disabled={disabled} onClick={() => { setTo(c.email); setToName(c.name) }}>Use contact</button>}
+        </p>)}
+        <details><summary>Captured job description</summary><div className="captured-jd">{job.application.jd}</div></details>
+      </section>}
 
       <section className="referrals">
         <h3>Referral routes ({referrals.length})</h3>
@@ -179,6 +198,11 @@ export default function Email({ jobId }: { jobId: number }) {
         </label>
 
         <div className="email-actions">
+          {job.application && <button type="button" disabled={disabled || !subject || !body} onClick={() => run('Saving…', async () => {
+            const result = await emailAction(jobId, { action: 'save_local', to, subject, body })
+            if (!result.ok) throw new Error(result.error)
+            setMsg('Draft saved in Jobwatch.')
+          })}>Save in Jobwatch</button>}
           <button type="button" disabled={disabled} onClick={generate}>
             {body ? 'Regenerate' : 'Generate with AI'}
           </button>

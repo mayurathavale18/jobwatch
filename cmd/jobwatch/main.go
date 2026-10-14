@@ -305,6 +305,19 @@ func runWorker(args []string) error {
 		PollInterval: 2 * time.Second,
 		MaxAttempts:  3,
 		Handlers: map[string]eventq.Handler{
+			store.EventApplicationDraft: func(ctx context.Context, payload string) error {
+				var p struct {
+					JobID int64 `json:"job_id"`
+				}
+				if err := json.Unmarshal([]byte(payload), &p); err != nil {
+					return err
+				}
+				command := exec.CommandContext(ctx, "python3", "scripts/application_draft.py", strconv.FormatInt(p.JobID, 10))
+				if output, err := command.CombinedOutput(); err != nil {
+					return fmt.Errorf("application draft: %w: %s", err, output)
+				}
+				return nil
+			},
 			store.EventTailorOne: func(ctx context.Context, payload string) error {
 				var p struct {
 					JobID int64 `json:"job_id"`
