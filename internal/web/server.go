@@ -38,6 +38,9 @@ func NewServer(st *store.Store) (*Server, error) {
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/applications", s.handleAPIApplications)
+	mux.HandleFunc("POST /api/applications/import", s.handleAPIApplicationsImport)
+	mux.HandleFunc("POST /api/applications/drafts", s.handleAPIApplicationDrafts)
 	mux.HandleFunc("GET /api/jobs", s.handleAPIJobs)
 	mux.HandleFunc("POST /api/jobs/manual", s.handleAPIJobsManual)
 	mux.HandleFunc("PATCH /api/jobs/{id}", s.handleAPIPatchJob)

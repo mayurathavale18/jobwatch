@@ -178,6 +178,18 @@ CREATE TABLE IF NOT EXISTS connections (
 	linkedin_url TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_connections_company ON connections(company);
+
+CREATE TABLE IF NOT EXISTS platform_applications (
+    job_id INTEGER PRIMARY KEY REFERENCES jobs(id),
+    platform TEXT NOT NULL,
+    source_id TEXT NOT NULL,
+    snapshot TEXT NOT NULL,
+    imported_at TEXT NOT NULL,
+    draft_subject TEXT NOT NULL DEFAULT '',
+    draft_body TEXT NOT NULL DEFAULT '',
+    draft_link TEXT NOT NULL DEFAULT '',
+    UNIQUE(platform,source_id)
+);
 `
 	if _, err := s.db.Exec(schema); err != nil {
 		return err

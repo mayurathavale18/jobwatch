@@ -46,3 +46,49 @@ def test_main_keeps_log_noise_off_stdout(monkeypatch, capsys):
     captured = capsys.readouterr()
     assert json.loads(captured.out) == {"ok": True}
     assert "chatter" in captured.err
+
+
+def test_application_followup_uses_observed_context_and_persists(tmp_path, monkeypatch):
+    import sqlite3
+    db = tmp_path / "applications.db"
+    monkeypatch.setattr(et.tr, "DB_PATH", db)
+    with sqlite3.connect(db) as conn:
+        conn.execute("CREATE TABLE platform_applications(job_id INTEGER PRIMARY KEY,snapshot TEXT,draft_subject TEXT,draft_body TEXT,draft_link TEXT)")
+        conn.execute("INSERT INTO platform_applications VALUES(1,?, '', '', '')", (json.dumps({"platform": "instahyre", "appliedAt": "October 4, 2026", "sourceStatus": "Application Sent"}),))
+    monkeypatch.setattr(et, "get_job", lambda _: {"title": "Engineer", "company_name": "Acme"})
+    monkeypatch.setattr(et.tr, "fetch_jd_text_for_job", lambda _: ("Python APIs", False))
+    monkeypatch.setattr(et.tr, "load_master_tex", lambda: "Verified resume")
+    def llm(**kw):
+        assert "instahyre" in kw["user_content"] and "October 4, 2026" in kw["user_content"]
+        assert "Do not claim a resume is attached" in kw["system_prompt"]
+        return '{"subject":"Follow-up","body":"I applied for the Engineer role."}'
+    monkeypatch.setattr(et.tr, "call_opencode", llm)
+    assert et.generate({"job_id": 1})["ok"]
+    with sqlite3.connect(db) as conn:
+        assert conn.execute("SELECT draft_subject,draft_body FROM platform_applications").fetchone() == ("Follow-up", "I applied for the Engineer role.")
+    et.save_application_content(1, "Edited", "Human revision", "https://mail.google.com/draft")
+    with sqlite3.connect(db) as conn:
+        assert conn.execute("SELECT draft_body,draft_link FROM platform_applications").fetchone() == ("Human revision", "https://mail.google.com/draft")
+
+
+def test_application_prepare_never_sends_and_requires_contact_for_gmail(monkeypatch, tmp_path):
+    import sqlite3
+    import application_draft as ad
+    db = tmp_path / "draft.db"
+    monkeypatch.setattr(et.tr, "DB_PATH", db)
+    with sqlite3.connect(db) as conn:
+        conn.execute("CREATE TABLE platform_applications(job_id INTEGER,draft_subject TEXT,draft_body TEXT)")
+        conn.execute("INSERT INTO platform_applications VALUES(1,'Saved subject','Saved body')")
+    app = {"contacts": [{"name": "Recruiter", "email": "", "evidence": "Named recruiter"}]}
+    monkeypatch.setattr(et, "get_application", lambda _: app)
+    monkeypatch.setattr(et, "get_job", lambda _: {"email_sent_at": "", "email_draft_id": ""})
+    monkeypatch.setattr(et, "send", lambda _: (_ for _ in ()).throw(AssertionError("must never send")))
+    saved = []
+    monkeypatch.setattr(et, "save_draft", lambda req: (saved.append(req), {"ok": True})[1])
+    assert ad.prepare(1)["status"] == "contact_needed"
+    assert not saved
+    app["contacts"][0]["email"] = "recruiter@example.test"
+    assert ad.prepare(1)["status"] == "gmail_draft"
+    assert saved[0]["to"] == "recruiter@example.test" and saved[0]["body"] == "Saved body"
+    monkeypatch.setattr(et, "get_job", lambda _: {"email_draft_id": "existing"})
+    assert ad.prepare(1)["status"] == "already_processed" and len(saved) == 1
