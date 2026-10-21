@@ -6,6 +6,8 @@
 # Local-only: secrets, runtime state, generated logs/backups, unrelated tools
 .env
 /profile.local.json
+/artifacts/
+/*.db.state/
 .poll_failcount
 .tg-sync-failures
 .tailor-resume-failures

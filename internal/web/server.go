@@ -19,10 +19,11 @@ var distFS embed.FS
 
 // Server serves the dashboard.
 type Server struct {
-	store   *store.Store
-	dist    fs.FS
-	logsDir string
-	pages   jobsubmit.PageFetcher
+	store      *store.Store
+	dist       fs.FS
+	logsDir    string
+	pages      jobsubmit.PageFetcher
+	processEnv []string
 }
 
 func NewServer(st *store.Store) (*Server, error) {
@@ -96,11 +97,12 @@ func httpError(w http.ResponseWriter, msg string, err error) {
 }
 
 // Serve starts the dashboard HTTP server and blocks until ctx is cancelled.
-func Serve(ctx context.Context, addr string, st *store.Store) error {
+func Serve(ctx context.Context, addr string, st *store.Store, processEnv []string) error {
 	srv, err := NewServer(st)
 	if err != nil {
 		return err
 	}
+	srv.processEnv = processEnv
 
 	httpServer := &http.Server{Addr: addr, Handler: srv.Handler()}
 

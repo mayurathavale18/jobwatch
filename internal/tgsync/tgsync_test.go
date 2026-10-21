@@ -444,7 +444,7 @@ func TestRunFixInvokesScriptWithJobAndReplyIDs(t *testing.T) {
 	dir := t.TempDir()
 	scriptPath := filepath.Join(dir, "fix.sh")
 	argsFile := filepath.Join(dir, "args.txt")
-	script := "#!/bin/sh\necho \"$@\" > " + argsFile + "\nexit 0\n"
+	script := "#!/bin/sh\n[ \"$JOBWATCH_DB_PATH\" = selected.db ] || exit 1\n[ \"$JOBWATCH_BINARY\" = selected-binary ] || exit 1\necho \"$@\" > " + argsFile + "\nexit 0\n"
 	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
 		t.Fatalf("writing fake script: %v", err)
 	}
@@ -453,6 +453,7 @@ func TestRunFixInvokesScriptWithJobAndReplyIDs(t *testing.T) {
 	st := newTestStoreWithJob(t)
 	fake := &fakeTelegram{all: fixUpdate("fix")}
 	syncer := &Syncer{Store: st, TG: fake, ChatID: 555, FixScript: scriptPath}
+	syncer.ProcessEnv = append(os.Environ(), "JOBWATCH_DB_PATH=selected.db", "JOBWATCH_BINARY=selected-binary")
 
 	if _, err := syncer.Run(ctx); err != nil {
 		t.Fatalf("Run: %v", err)
@@ -818,7 +819,7 @@ func TestRunOutreachInvokesScriptWithJobIDAndEmail(t *testing.T) {
 	dir := t.TempDir()
 	scriptPath := filepath.Join(dir, "outreach.sh")
 	argsFile := filepath.Join(dir, "args.txt")
-	script := "#!/bin/sh\necho \"$@\" > " + argsFile + "\nexit 0\n"
+	script := "#!/bin/sh\n[ \"$JOBWATCH_DB_PATH\" = selected.db ] || exit 1\n[ \"$JOBWATCH_BINARY\" = selected-binary ] || exit 1\necho \"$@\" > " + argsFile + "\nexit 0\n"
 	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
 		t.Fatalf("writing fake script: %v", err)
 	}
@@ -827,6 +828,7 @@ func TestRunOutreachInvokesScriptWithJobIDAndEmail(t *testing.T) {
 	st := newTestStoreWithJob(t)
 	fake := &fakeTelegram{all: outreachUpdate("outreach: jane@acme.xyz")}
 	syncer := &Syncer{Store: st, TG: fake, ChatID: 555, OutreachScript: scriptPath}
+	syncer.ProcessEnv = append(os.Environ(), "JOBWATCH_DB_PATH=selected.db", "JOBWATCH_BINARY=selected-binary")
 
 	if _, err := syncer.Run(ctx); err != nil {
 		t.Fatalf("Run: %v", err)

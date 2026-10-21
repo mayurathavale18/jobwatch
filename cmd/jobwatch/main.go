@@ -167,7 +167,11 @@ func runServe(args []string) error {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
-	return web.Serve(ctx, cfg.Dashboard.Addr, st)
+	processEnv, err := cfg.SubprocessEnv()
+	if err != nil {
+		return err
+	}
+	return web.Serve(ctx, cfg.Dashboard.Addr, st, processEnv)
 }
 
 // runRefilter re-applies the current config filters to every job still in
@@ -256,6 +260,10 @@ func runTgSync(args []string) error {
 	}
 
 	syncer := tgsync.New(st, tg, chatID, *fixScript, *outreachScript)
+	syncer.ProcessEnv, err = cfg.SubprocessEnv()
+	if err != nil {
+		return err
+	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
@@ -299,8 +307,13 @@ func runWorker(args []string) error {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
+	processEnv, err := cfg.SubprocessEnv()
+	if err != nil {
+		return err
+	}
+
 	runScript := func(ctx context.Context, script string, scriptArgs ...string) error {
-		return runLoggedScript(ctx, *logsDir, script, scriptArgs...)
+		return runLoggedScript(ctx, *logsDir, script, processEnv, scriptArgs...)
 	}
 
 	w := &eventq.Worker{
@@ -359,6 +372,7 @@ func runWorker(args []string) error {
 	tg.Client = &http.Client{Timeout: 70 * time.Second}
 
 	syncer := tgsync.New(st, tg, chatID, *fixScript, *outreachScript)
+	syncer.ProcessEnv = processEnv
 	w.Handlers[store.EventTelegramUpdate] = syncer.HandleEvent
 
 	listenErr := make(chan error, 1)
@@ -378,12 +392,13 @@ func runWorker(args []string) error {
 // returns an error carrying the output's last line on failure.
 // ponytail: 20-minute cap covers tailor-one's 5-minute lock wait plus a run;
 // weekly-backup has no cap of its own, raise this if it ever gets killed.
-func runLoggedScript(ctx context.Context, logsDir, script string, args ...string) error {
+func runLoggedScript(ctx context.Context, logsDir, script string, processEnv []string, args ...string) error {
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Minute)
 	defer cancel()
 
 	var out bytes.Buffer
 	cmd := exec.CommandContext(ctx, "bash", append([]string{script}, args...)...)
+	cmd.Env = processEnv
 	cmd.Stdout = &out
 	cmd.Stderr = &out
 	runErr := cmd.Run()

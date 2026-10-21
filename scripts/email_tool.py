@@ -13,7 +13,7 @@ side only has to parse, never interpret exit codes. Actions:
 Reuses tailor_resume's OpenCode + Gmail plumbing (same .env, same
 gmail.compose scope -- compose covers create/update/send of drafts).
 An empty "to" is allowed for save_draft: the draft lands in Gmail with a
-blank To: field for Mayur to fill in manually.
+blank To: field for the candidate to fill in manually.
 """
 import json
 import sqlite3
@@ -75,12 +75,14 @@ def set_email_fields(job_id, draft_id=None, to=None, sent_at=None):
         conn.close()
 
 
+@tr.pr.action
 def generate(req):
+    tr.pr.require_identity()
     job = get_job(req["job_id"])
     if not job:
         return {"ok": False, "error": f"job {req['job_id']} not found"}
     jd_text, _unavailable = tr.fetch_jd_text_for_job(job)
-    resume_text = tr.load_master_tex()
+    resume_text = tr.pr.outreach_context()
     to_name = req.get("to_name", "")
     instruction = req.get("instruction", "")
 
@@ -93,13 +95,13 @@ def generate(req):
 
     raw = tr.call_opencode(
         system_prompt=(
-            "You write short, genuine-sounding emails from a software "
-            "engineer job candidate to a recruiter or potential referrer "
+            "You write short, genuine-sounding emails from a "
+            "job candidate to a recruiter or potential referrer "
             f"about a {job.get('title')} role at {job.get('company_name')}. "
             "Reference one or two concrete points from the job description "
             "and the candidate's resume that make them a strong fit -- do "
             "not invent any experience not present in the resume text. "
-            "Mention that a tailored resume is attached. If additional "
+            "Do not claim an attachment is present; that is checked when saving. If additional "
             "context from the candidate is given, honor its tone/emphasis "
             "requests. Keep it under 150 words, no generic flattery. "
             "Respond with ONLY valid JSON, no markdown fences: "
@@ -112,7 +114,9 @@ def generate(req):
     return _parse_subject_body(raw)
 
 
+@tr.pr.action
 def revise(req):
+    tr.pr.require_identity()
     raw = tr.call_opencode(
         system_prompt=(
             "You revise a job candidate's email per their instruction. "
@@ -122,6 +126,7 @@ def revise(req):
             '{"subject": "...", "body": "..."}'
         ),
         user_content=(
+            f"CANDIDATE PROFILE:\n{tr.pr.outreach_context()}\n\n"
             f"CURRENT SUBJECT: {req.get('subject', '')}\n\n"
             f"CURRENT BODY:\n{req.get('body', '')}\n\n"
             f"INSTRUCTION: {req.get('instruction', '')}\n\n"
@@ -167,6 +172,7 @@ def _draft_payload(to, subject, body, attachment_path):
     return json.dumps({"message": {"raw": raw}}).encode("utf-8")
 
 
+@tr.pr.action
 def save_draft(req):
     job_id = req["job_id"]
     to = req.get("to", "").strip()
@@ -179,11 +185,10 @@ def save_draft(req):
     if not token:
         return {"ok": False, "error": "Gmail not configured or token refresh failed"}
 
-    # Attach the tailored resume when its PDF still exists on this
-    # pod's filesystem (cron-pod PDFs are ephemeral -- fine to skip).
+    # Attach only a PDF generated for this profile snapshot.
     attachment = None
     entry = tr.load_tailored().get(str(job_id)) or {}
-    if entry.get("pdf_path") and Path(entry["pdf_path"]).exists():
+    if tr.pr.matches(entry) and entry.get("pdf_path") and Path(entry["pdf_path"]).exists():
         attachment = entry["pdf_path"]
 
     payload = _draft_payload(to, subject, body, attachment)

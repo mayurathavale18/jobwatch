@@ -81,6 +81,23 @@ func TestProfileCLIImportExport(t *testing.T) {
 	}
 }
 
+func TestProfileCLIDatabaseOverrideDoesNotLoadConfig(t *testing.T) {
+	_, input, db := profileFiles(t)
+	missingConfig := filepath.Join(t.TempDir(), "missing.yaml")
+	var out bytes.Buffer
+	if err := runProfile([]string{"import", "-db", db, "-config", missingConfig, "-file", input, "-apply"}, &out); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	if err := runProfile([]string{"export", "-db", db, "-config", missingConfig}, &out); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := profile.Decode(&out)
+	if err != nil || snapshot.Profile.Identity.Name != "Alex Example" {
+		t.Fatalf("wrong profile: %+v %v", snapshot, err)
+	}
+}
+
 func TestProfileCLIRejectsBadInputBeforeOpeningDatabase(t *testing.T) {
 	for name, inputJSON := range map[string]string{
 		"invalid policy": `{"profile":{"schemaVersion":1,"automation":{"minFitToNotify":101}}}`,
