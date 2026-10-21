@@ -18,10 +18,11 @@ const (
 
 // Event kinds.
 const (
-	EventTelegramUpdate = "telegram_update" // payload: raw Telegram update JSON
-	EventTailorOne      = "tailor_one"      // payload: {"job_id": N}
-	EventOutreach       = "outreach"        // payload: {"job_id": N, "founder_email": "..."}
-	EventCronRun        = "cron_run"        // payload: {"name": "poll"}
+	EventApplicationDraft = "application_draft" // payload: {"job_id": N}
+	EventTelegramUpdate   = "telegram_update"   // payload: raw Telegram update JSON
+	EventTailorOne        = "tailor_one"        // payload: {"job_id": N}
+	EventOutreach         = "outreach"          // payload: {"job_id": N, "founder_email": "..."}
+	EventCronRun          = "cron_run"          // payload: {"name": "poll"}
 )
 
 type Event struct {
