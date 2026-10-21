@@ -156,6 +156,13 @@ CREATE TABLE IF NOT EXISTS kv (
 	value TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS candidate_profile (
+	id INTEGER PRIMARY KEY CHECK(id = 1),
+	revision INTEGER NOT NULL CHECK(revision > 0),
+	document TEXT NOT NULL CHECK(json_valid(document)),
+	updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS events (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
 	kind TEXT NOT NULL,

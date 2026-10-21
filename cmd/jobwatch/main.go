@@ -45,6 +45,8 @@ func main() {
 
 	var err error
 	switch cmd {
+	case "profile":
+		err = runProfile(args, os.Stdout)
 	case "import-jobs":
 		err = runImportJobs(args)
 	case "poll":
@@ -80,6 +82,8 @@ func usage() {
 	fmt.Fprintln(os.Stderr, `jobwatch — job-opening tracker
 
 Usage:
+  jobwatch profile import -file profile.local.json [-apply] [-config config.yaml]  validate or save a versioned profile
+  jobwatch profile export [-config config.yaml]  export the stored profile and revision as JSON
   jobwatch import-jobs -file alerts.json [-config config.yaml] [-apply]  preview or import exported alerts; no notifications
   jobwatch poll        [-config config.yaml]   run one polling cycle, notify on new matches, then exit
   jobwatch backfill    [-config config.yaml]   poll and store everything as seen, without notifying
