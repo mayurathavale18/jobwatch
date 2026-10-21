@@ -1,330 +1,282 @@
 # jobwatch
 
-Polls the public job-board APIs of a configurable list of companies, detects
-new postings, filters them by keyword/location, stores them in SQLite,
-sends a Telegram notification per new match, and serves a local dashboard
-to track application status.
+Watch job boards, filter new roles, tailor resumes, track applications, and draft outreach from a dashboard or Telegram.
 
-Supported ATS providers: **Greenhouse**, **Lever**, **Ashby**, **Workday**.
-Also pulls from search aggregators **RemoteOK** and **We Work Remotely**,
-plus manual URL submission via Telegram for sites that block automated
-access (Naukri, YC, Wellfound).
+I built jobwatch for my own job search. It runs on my server: scheduled jobs collect openings and prepare resumes, a dashboard holds the jobs and their status, and a worker handles Telegram replies and queued actions. I can add a job link, get a tailored PDF, ask for edits, and draft an email without moving the same details between tools.
 
-## Setup
+The polling and tracking work independently of the AI features. Resume generation still contains my own skills, experience, and projects in Python. You can run the tracker with your own sources today; using the resume pipeline requires changing that content too. Making that setup reusable is the next step.
 
-1. Build (this compiles the React dashboard first, then embeds it into the
-   Go binary — needs Go 1.25+ and Node 22+):
+## What it does
 
-   ```sh
-   make build
-   ```
+- **Collects jobs** from Greenhouse, Lever, Ashby, Workday, RemoteOK, We Work Remotely, Remotive, and Web3Career. Sources and title/location filters live in YAML.
+- **Keeps source history in SQLite.** It records polling runs, refreshes known postings, prevents repeat ingestion of the same source ID, and links similar listings for review rather than silently dropping distinct requisitions.
+- **Evaluates roles against preferences.** An LLM returns a verdict, preference-fit score, work mode, and explanation. If the LLM is unavailable, the verdict falls back to keyword coverage and leaves preference fit unknown.
+- **Builds tailored resume PDFs.** It selects and orders curated skills and experience for a job, compiles LaTeX with Tectonic, and checks that the result is one page.
+- **Accepts jobs you find elsewhere.** Submit a URL in the dashboard or send it to the bot. The dashboard also accepts pasted or uploaded job-description text when the page cannot be fetched.
+- **Tracks applications** with statuses, notes, and history. Update them from the dashboard or by replying to a Telegram notification.
+- **Prepares outreach.** Import LinkedIn connections, see contacts at a company, generate or revise an email, save it as a Gmail draft, and send it after confirmation in the dashboard. Founder outreach can also create a draft after tailoring, subject to its lookup and company filters.
+- **Shows background work.** The Cron page displays scheduled-job status and the event queue, with actions to run supported tasks immediately.
 
-2. Copy `config.yaml` and edit it — add your companies, tune the keyword and
-   location filters. See [Adding a company](#adding-a-company) below for how
-   to find each provider's `slug`.
+Jobwatch does not submit applications to company portals. Generated resumes and emails need your review.
 
-3. Create a Telegram bot and get your chat ID (see below). Copy
-   `.env.example` to `.env` and fill in both values (the cron wrapper
-   scripts and `deploy/jobwatch.service` both `source .env`), or just
-   `export` them directly in your shell:
+## How the parts fit together
 
-   ```sh
-   export JOBWATCH_TG_TOKEN="123456:ABC-DEF..."
-   export JOBWATCH_TG_CHAT="123456789"
-   ```
+```mermaid
+flowchart TD
+    Sources[Job-board APIs and feeds] --> Poll[Go poller]
+    Poll --> DB[(SQLite)]
+    Poll --> Alerts[Telegram discovery alerts]
+    Schedule[Scheduled tailoring] --> Python[Python resume and outreach tools]
+    DB --> Python
+    Python --> DB
+    Python --> Results[Resume PDFs and verdicts in Telegram]
+    Python --> Gmail[Gmail drafts]
+    Dashboard[React dashboard and Go API] <--> DB
+    Dashboard --> Queue[SQLite events]
+    Replies[Telegram replies] --> Worker[Go worker]
+    Queue --> Worker
+    Worker --> DB
+    Worker --> Python
+    Worker --> Scripts[Scheduled-task wrappers]
+```
 
-4. Seed the database so you don't get flooded with notifications for every
-   job that already exists:
+The Go binary provides the poller, HTTP API, Telegram listener, and event worker. The React dashboard is built with Vite and embedded in that binary. Python handles job-description extraction, resume construction, LLM calls, and Gmail integration. The shell scripts load the environment and run those tools on Linux.
 
-   ```sh
-   ./bin/jobwatch backfill -config config.yaml
-   ```
+`serve` and `worker` are separate processes. The dashboard enqueues manual tailoring, founder outreach, and scheduled-task actions; the worker executes them. Telegram updates and their polling offset are stored together before processing. Interrupted events are recovered on worker startup; handler errors remain visible as failures rather than being blindly retried.
 
-5. From then on, run polling on a schedule (cron example below):
+Polling and batch tailoring need an external scheduler. Running the worker alone does not schedule them. The email composer calls its Python helper directly through the Go API.
 
-   ```sh
-   ./bin/jobwatch poll -config config.yaml
-   ```
+## Run the tracker locally
 
-6. View the dashboard:
+The commands below use Bash on Linux or WSL. Build requirements are Go 1.25+, Node.js 22.12+ and npm, plus `make` for the build shortcut. Python and the PDF tools are only needed for tailoring and email features.
 
-   ```sh
-   ./bin/jobwatch serve -config config.yaml
-   # open http://127.0.0.1:8787
-   ```
-
-## Creating a Telegram bot and finding your chat ID
-
-1. Open Telegram, message **@BotFather**, and send `/newbot`. Follow the
-   prompts (choose a name and a username ending in `bot`). BotFather replies
-   with a token that looks like `123456789:AAExampleTokenValue`. That's your
-   `JOBWATCH_TG_TOKEN`.
-2. Send any message to your new bot (search for its username and hit
-   Start/send "hi").
-3. Fetch updates to find your chat ID:
-
-   ```sh
-   curl "https://api.telegram.org/bot<YOUR_TOKEN>/getUpdates"
-   ```
-
-   Look for `"chat":{"id":123456789,...}` in the response — that number is
-   your `JOBWATCH_TG_CHAT`. (If the response is empty, make sure you sent
-   the bot a message first.)
-4. Verify it's wired up:
-
-   ```sh
-   ./bin/jobwatch test-notify -config config.yaml
-   ```
-
-   This exits with a clear error if either env var is missing or the
-   Telegram API call fails, and sends a real message otherwise.
-
-## Adding a company
-
-Each entry in `config.yaml`'s `companies` list needs a `name`, a `provider`
-(`greenhouse`, `lever`, `ashby`, or `workday`), and a `slug`. The slug is
-specific to each ATS and is usually visible in the company's careers page
-URL:
-
-- **Greenhouse**: careers pages are often `https://boards.greenhouse.io/{slug}`,
-  or check the network tab for calls to
-  `https://boards-api.greenhouse.io/v1/boards/{slug}/jobs`.
-- **Lever**: careers pages are often `https://jobs.lever.co/{slug}`.
-- **Ashby**: careers pages are often `https://jobs.ashbyhq.com/{slug}`.
-
-You can sanity-check a slug before adding it by curling the API directly,
-e.g. for Greenhouse:
+### 1. Build
 
 ```sh
-curl -s "https://boards-api.greenhouse.io/v1/boards/stripe/jobs?content=true" | head -c 300
+git clone https://github.com/mayurathavale18/jobwatch.git
+cd jobwatch
+make build
 ```
 
-Note: Ashby's own docs describe the job board endpoint as `POST`, but the
-live API only accepts `GET` (a `POST` returns `401 Unauthorized`); this is
-what jobwatch actually does — verified against Ashby's own public board.
-
-### Workday
-
-Workday needs two extra fields, `host` and `site`, because a Workday
-careers URL is `https://{slug}.{host}.myworkdayjobs.com/{site}` — three
-independent parts, not one slug:
-
-```yaml
-- name: "Wells Fargo"
-  provider: workday
-  slug: wf
-  host: wd1
-  site: WellsFargoJobs
-```
-
-To find these for a company: open their careers page, watch the network
-tab for a `POST .../wday/cxs/{tenant}/{site}/jobs` request, and read
-`tenant`/`host`/`site` straight out of the URL. Not every company that
-"looks big" is actually on Workday — e.g. Oracle's own careers site runs on
-Oracle's own recruiting platform, not Workday, despite `myworkdayjobs.com`
-hosting plenty of *other* companies' Oracle-titled job postings. Verify
-with a real request before adding an entry:
+This builds the frontend into `internal/web/dist`, then compiles `bin/jobwatch`. To run the build steps separately:
 
 ```sh
-curl -s -X POST "https://{slug}.{host}.myworkdayjobs.com/wday/cxs/{slug}/{site}/jobs" \
-  -H "Content-Type: application/json" -d '{"appliedFacets":{},"limit":5,"offset":0,"searchText":""}'
+cd frontend
+npm ci
+npm run build
+cd ..
+go build -o bin/jobwatch ./cmd/jobwatch
 ```
 
-A `422` means the site name is wrong; a `200` with a `jobPostings` array
-means it's correct. Large employers can have thousands of open postings —
-jobwatch fetches up to 300 per company per poll cycle (most-recent-first),
-not the entire board; see the Design notes below.
+### 2. Choose your sources and filters
 
-### Search aggregators (RemoteOK, We Work Remotely)
-
-Unlike the ATS providers above, `remoteok` and `wwr` aren't scoped to one
-company — each poll returns jobs across many different real companies, and
-every returned job carries its own company name, not the config entry's.
-`slug` is required by the config schema but unused; any label works:
+Edit [config.yaml](config.yaml). It contains the sources and filters used for my search, so review them before polling. For local use, set the dashboard address to loopback:
 
 ```yaml
-- name: "RemoteOK"
-  provider: remoteok
-  slug: remoteok
-- name: "We Work Remotely"
-  provider: wwr
-  slug: wwr
+dashboard:
+  addr: "127.0.0.1:8787"
+db_path: "./jobwatch.db"
 ```
 
-Both are public, unauthenticated feeds (RemoteOK's JSON API, WWR's RSS) —
-no slug lookup needed. Because the same real posting can be discovered
-twice (once via a company's own board, once via an aggregator indexing it),
-jobwatch also fuzzy-dedupes on normalized company+title+location across
-*all* providers within a 30-day window before inserting — see `Design
-notes` below.
+The checked-in address is `0.0.0.0:8787` for the deployed container. The application has no built-in authentication; keep a local instance on loopback, or put authentication in front of it when hosting it.
 
-Naukri, Work at a Startup (YC), and Wellfound were considered too but all
-three actively block automated/non-browser access (reCAPTCHA, bot
-challenges) — not something jobwatch scrapes around. Use the manual-submit
-flow instead (see [Manually adding a job](#manually-adding-a-job-naukri-yc-wellfound-or-anywhere-else) above).
+### 3. Seed the database and open the dashboard
 
-## Cron example
+```sh
+./bin/jobwatch backfill -config config.yaml
+./bin/jobwatch serve -config config.yaml
+```
 
-See `deploy/crontab.example` for a ready-to-edit crontab covering polling,
-Telegram sync, the dashboard health-check watchdog, and weekly DB backups.
-Copy it, replace the placeholder path, and `crontab deploy/crontab.example`.
+Open [localhost:8787](http://127.0.0.1:8787). Backfill records existing jobs without sending discovery notifications. To collect later openings, run this in another terminal or schedule it:
 
-The dashboard's Cron tab also has a "Run now" button per job — useful for
-triggering `tg-sync` outside its scheduled hours, or any job without
-waiting for its next tick, without touching the crontab at all.
+```sh
+./bin/jobwatch poll -config config.yaml
+```
 
-Run the dashboard itself as a systemd service (see Deployment below) or in
-a long-lived shell/tmux session with `make run-serve` — it binds to
-`127.0.0.1` only by default, so it's not reachable beyond the machine it
-runs on unless you change `dashboard.addr` in `config.yaml`.
+Without Telegram credentials, polling still stores jobs and logs that notifications are disabled. The dashboard can browse jobs and update statuses without a worker. Queued actions need the worker and the tools required by each action.
 
-## Deployment (AWS, or any single Linux box)
+## Add Telegram
 
-jobwatch is one Go binary + SQLite + a crontab — there's no database
-server, container orchestration, or multi-machine anything to set up. The
-whole thing runs comfortably on the smallest instance size available
-(e.g. a $3.50-5/mo AWS Lightsail instance, or a `t3.micro`/`t4g.micro` EC2
-instance within the free tier).
+Create your own bot through **@BotFather**, start a conversation with it, and obtain your chat ID. Before starting the worker, you can inspect the bot's `getUpdates` response to find the `message.chat.id` field. Use a separate bot for development if another instance is already consuming updates.
 
-1. Spin up an Ubuntu 22.04 or 24.04 instance (Lightsail or EC2).
-2. Clone this repo onto it, e.g. to `/opt/jobwatch`.
-3. Run the bootstrap script as root:
+Copy [.env.example](.env.example) to `.env` and replace the example values:
 
-   ```sh
-   cd /opt/jobwatch
-   sudo bash deploy/setup.sh
-   ```
+```sh
+cp .env.example .env
+# Edit .env, then load it into this shell:
+set -a
+source .env
+set +a
+```
 
-   This installs Go, Node, tectonic, and `pdfinfo`; creates a dedicated
-   `jobwatch` system user; builds the frontend + binary; installs
-   `deploy/jobwatch.service` (systemd, auto-restart on crash); and installs
-   `deploy/crontab.example`'s **core** jobs (poll, tg-sync,
-   dashboard-watchdog, weekly-backup) for that user. It does *not* enable
-   the resume-tailoring cron — that's commented out in the crontab
-   template since it needs your own `resume/master.tex` + `resume/facts.md`
-   (see below), not something to inherit from whoever you forked this
-   from.
-4. Edit `.env` (from `.env.example`) with your real Telegram bot token +
-   chat id, and `config.yaml` with your companies/keywords/locations.
-5. Seed the database once so you don't get flooded with notifications for
-   every job that already exists:
+The Go commands read exported environment variables; they do not load `.env` themselves. The worker and tailoring shell wrappers load it for you.
 
-   ```sh
-   sudo -u jobwatch /opt/jobwatch/bin/jobwatch backfill -config /opt/jobwatch/config.yaml
-   ```
+```sh
+./bin/jobwatch test-notify -config config.yaml
+bash scripts/worker.sh
+```
 
-6. Start it: `systemctl start jobwatch` — then `systemctl status jobwatch`
-   and `curl -s localhost:8787 | head -c 200` to confirm it's up.
+`test-notify` sends a real message. Keep the worker running alongside the dashboard. Run all processes from the repository root so they share the same database and scripts.
 
-**Reaching the dashboard remotely:** it has no authentication, so don't
-open its port to the internet. Either keep it to `127.0.0.1` and reach it
-over an SSH tunnel (`ssh -L 8787:localhost:8787 your-instance`), or put it
-behind something that does its own auth (a reverse proxy with basic auth,
-a VPN, Tailscale, etc.) if you want browser access without tunneling every
-time.
+**Run one worker per bot.** Do not run `tg-sync` or a second worker against that bot at the same time; both consume Telegram updates. Do not run independent polling installations against the same bot with separate databases either, as each will consider jobs new.
 
-**Sharing this with friends:** each person runs their own instance from
-their own fork/clone — their own AWS box, their own `config.yaml` (own
-companies/keywords), their own Telegram bot, their own `.env`. There's no
-shared/multi-tenant deployment model here; `deploy/setup.sh` and this
-README are the "product" being shared, not a hosted service.
+Reply directly to a job notification:
 
-## Two-way status control via Telegram
-
-Every job notification `poll` sends ends with a hidden tag, e.g. `#J123`.
-**Reply directly to that message** in Telegram to update the job's status
-or leave a note — no need to open the dashboard. `tg-sync` drains these
-replies on its own schedule (see cron example above) and applies them.
-
-Reply with (first word, case-insensitive):
-
-| Reply keyword(s) | Status set |
+| Reply | Action |
 |---|---|
-| `applied`, `done`, `apld` | `applied` |
-| `skip`, `skipped`, `ignore`, `no` | `ignored` |
-| `shortlist`, `sl`, `later` | `shortlisted` |
-| `rejected`, `reject`, `rej` | `rejected` |
-| `interview`, `iv` | `interview` |
-| `offer` | `offer` |
-| `new`, `reset` | `new` |
+| `applied`, `done` | Mark applied |
+| `shortlist`, `later` | Mark shortlisted |
+| `skip`, `ignore` | Mark ignored |
+| `rejected`, `interview`, `offer` | Set that status |
+| `new`, `reset` | Set status back to new |
+| `note: applied through a referral` | Append a timestamped note |
+| `fix` | Rebuild the tailored resume |
+| `fix: emphasize backend work` | Rebuild with an edit instruction |
+| `update: shorten the summary` | Edit the cached resume content |
+| `outreach` or `outreach: person@example.com` | Run founder outreach, optionally with a supplied recipient |
 
-Or reply starting with `note: ` (e.g. `note: applied via referral`) to
-append a timestamped note without changing status.
+Resume and outreach replies need the Python setup below. Send a bare job URL as a new message to add a manual job. If automated extraction fails, use the dashboard to supply the description.
 
-If your reply doesn't match any keyword, jobwatch replies with the keyword
-list above and leaves the job's status untouched. If it can't find a job
-tag in the message you replied to, or the tagged job id doesn't exist, it
-replies explaining why — either way, nothing in the database changes.
+## Set up resumes and email
 
-Only replies from the chat configured in `JOBWATCH_TG_CHAT` are processed;
-updates from any other chat are logged and ignored.
+Install Python 3, [Tectonic](https://tectonic-typesetting.github.io/), and Poppler's `pdfinfo`. On Ubuntu, Tectonic also needs `libgraphite2-3`. The main Python scripts use the standard library.
 
-### Manually adding a job (Naukri, YC, Wellfound, or anywhere else)
+Before enabling tailoring, replace the candidate content:
 
-Some job boards (Naukri, Work at a Startup, Wellfound, ...) actively block
-automated access, so jobwatch can't poll them as a provider. Instead, send
-the bot a plain message containing **just the job's URL** (not a reply) and
-it fetches the page's title and adds it as a new job — same status,
-`note:`, and `fix` handling as any polled job, and it rides the existing
-tailor-resume cron. If the title can't be auto-detected, reply `note: <real
-title>` to fix it up. Resending the same URL is a no-op.
+| File | What it controls |
+|---|---|
+| [resume/master.tex](resume/master.tex) | LaTeX structure and contact details; keep the section anchors used by the generator |
+| [resume/preferences.md](resume/preferences.md) | Search preferences passed into the LLM judgment |
+| [resume/facts.md](resume/facts.md) | Candidate evidence maintained alongside the generator; editing it alone does not update the generated resume |
+| [scripts/tailor_resume.py](scripts/tailor_resume.py) | Active skill tiers, experience bullets, projects, output naming, role/experience filters, and batch limits |
+
+The generator currently assumes an engineering search and includes a three-year required-experience ceiling. Review those rules along with the content. The Go CLI supports a custom database path, but the Python tools currently expect `jobwatch.db` in the repository root.
+
+Add credentials to your local `.env` for the features you want:
+
+| Variables | Used for |
+|---|---|
+| `JOBWATCH_TG_TOKEN`, `JOBWATCH_TG_CHAT` | Discovery alerts, resume delivery, and bot replies |
+| `WEB3CAREER_API_TOKEN` | Web3Career feed |
+| `OPENCODE_API_KEY` | OpenCode-hosted LLM calls for extraction fallback, verdicts, and email generation/revision |
+| `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `GMAIL_REFRESH_TOKEN` | Gmail drafts and dashboard sending |
+| `APOLLO_API_KEY` | Company/person lookup for founder outreach |
+
+`.env.example` only contains the Telegram entries; add the others as needed. Keep `.env` and personal runtime data out of commits. LLM features send job and candidate text to the configured external service; a self-hosted dashboard does not make those calls local.
+
+For Gmail, [scripts/gmail_auth_setup.py](scripts/gmail_auth_setup.py) provides the one-time OAuth flow. The [outreach setup notes](docs/superpowers/specs/2026-07-27-founder-outreach-design.md) describe the credentials. The Apollo free-tier setup used here cannot return founder email addresses; supply a verified recipient through the dashboard or an `outreach:` reply when lookup is unavailable. The email composer also supports saving a draft with the recipient left blank.
+
+After personalization and tool setup, run a batch with:
+
+```sh
+bash scripts/tailor-resume-wrapper.sh
+```
+
+The worker can also process a manual job from the dashboard. Import a LinkedIn data-export `Connections.csv` on the Connections page to make company contacts available in the email composer.
+
+### Current limits
+
+- Discovery alerts and tailored-resume alerts are separate. A discovery alert has passed title/location filters, not the later LLM judgment.
+- Batch tailoring suppresses its notification when known preference fit is below 45. Manual submissions bypass that threshold, and an unknown fit is not a rejection.
+- A successful compile and one-page check do not verify every resume claim, visual layout, or ATS parsing result. Review the PDF and any instruction-driven edits.
+- The batch skips a job once it has any entry in `resume/tailored.json`, including a failure. Use a manual rebuild to retry it.
+- PDFs currently go under the process user's `~/Documents/mayur-athavale-resume`. In a container, that directory needs persistent storage if the files must survive restarts or be available to a different pod for email attachments.
+- Evidence-ledger, classifier, and ranking experiments are advisory or shadow paths. They are not the normal eligibility or resume-generation engine.
+
+## Add a source
+
+Each entry in `config.yaml` needs `name`, `provider`, and `slug`:
+
+```yaml
+companies:
+  - name: "Stripe"
+    provider: greenhouse
+    slug: stripe
+  - name: "Wells Fargo"
+    provider: workday
+    slug: wf
+    host: wd1
+    site: WellsFargoJobs
+  - name: "Remotive"
+    provider: remotive
+    slug: remotive
+```
+
+For company boards, find the slug in the careers URL or its network requests:
+
+| Provider | Board or endpoint shape |
+|---|---|
+| `greenhouse` | `boards-api.greenhouse.io/v1/boards/{slug}/jobs` |
+| `lever` | `jobs.lever.co/{slug}` |
+| `ashby` | `jobs.ashbyhq.com/{slug}` |
+| `workday` | `{slug}.{host}.myworkdayjobs.com/wday/cxs/{slug}/{site}/jobs` |
+
+Verify the actual board before adding it. Workday requires both `host` and `site`, and collection is capped at 300 postings per source per poll.
+
+`remoteok`, `wwr`, `remotive`, and `web3career` return jobs across companies. Their slug is a required config label, not a company board ID. Web3Career requires its API token. A feed is not guaranteed to cover every opening.
+
+For an unsupported or blocked site, submit a URL and description manually. Jobwatch has no headless-browser scraping or automatic application submission.
 
 ## Commands
 
+Run these from the repository root. Each accepts `-config path/to/config.yaml`.
+
 | Command | Behavior |
 |---|---|
-| `jobwatch poll` | Runs one polling cycle across all companies, stores new jobs, sends Telegram notifications for matches, then exits. Intended to be called by cron. |
-| `jobwatch backfill` | Same as `poll`, but never sends notifications — use this once, on first run, to seed the database. |
-| `jobwatch serve` | Runs the dashboard web server (long-running). |
-| `jobwatch test-notify` | Sends a single test Telegram message and exits. Fails with a clear error if `JOBWATCH_TG_TOKEN` / `JOBWATCH_TG_CHAT` aren't set or the API call fails. |
-| `jobwatch tg-sync` | Drains Telegram replies since the last run and applies any status/notes changes found (see above), then exits. Intended to be called by cron. |
+| `jobwatch backfill` | Fetch and record existing jobs without discovery notifications |
+| `jobwatch poll` | Run one collection cycle, store jobs, and notify on new filter matches |
+| `jobwatch serve` | Serve the dashboard and JSON API |
+| `jobwatch worker` | Long-poll Telegram and process queued events until stopped |
+| `jobwatch refilter` | Reapply current filters to `new` jobs; mark failures ignored |
+| `jobwatch test-notify` | Send a real test Telegram message |
+| `jobwatch tg-sync` | Consume Telegram updates once; never run alongside the worker |
+| `jobwatch import-jobs -file alerts.json` | Preview a structured job import; add `-apply` to write it without notifications |
 
-All commands accept `-config path/to/config.yaml` (default `config.yaml`).
+## Scheduling and deployment
 
-## Design notes
+My deployment runs on a single Contabo server with k3s: separate dashboard and worker Deployments, shared code/data on a persistent volume, and CronJobs for polling, tailoring, summaries, and backups. The worker uses one replica and the `Recreate` strategy so two pods do not consume the same bot's updates.
 
-- Providers are normalized into one `Job` struct in `internal/providers`.
-  Adding another ATS means implementing the `Provider` interface
-  (`Fetch(ctx, company) ([]Job, error)`) in one new file.
-- Dedupe key is `(provider, company_slug, external_id)`, enforced both by a
-  SQLite `UNIQUE` constraint and an explicit existence check before insert.
-  On top of that, a fuzzy check (normalized company+title+location, any
-  provider, within 30 days) catches the same real posting surfacing via two
-  different sources — e.g. a company's own Greenhouse board and a search
-  aggregator indexing it — which the exact key can't, since the two
-  providers assign unrelated external IDs to the same job.
-- Polling fans out to at most 5 companies concurrently (semaphore-bounded),
-  with a 60s timeout per company (sized for Workday's pagination — up to 15
-  sequential requests per company — not just a single HTTP call). A failure
-  on one company is logged and skipped — it never aborts the whole cycle.
-- The dashboard (`internal/web`) is a Vite+React SPA built to
-  `internal/web/dist/` and embedded into the Go binary via `go:embed` —
-  `make build` builds the frontend first, since the embed directive needs
-  that directory to exist at compile time. The Go side only exposes a JSON
-  API (`GET /api/jobs`, `PATCH /api/jobs/{id}`, `GET /api/cron`,
-  `POST /api/cron/{name}/run`); there's no server-rendered HTML or
-  templating left. `frontend/node_modules/` and `internal/web/dist/` are
-  gitignored build artifacts — regenerated by `make build`, not committed.
-- New jobs that fail the configured filters are still stored (status
-  `ignored`) so they're never re-evaluated or re-notified on subsequent
-  polls — only jobs that pass filters get status `new` and a notification.
-- SQLite runs in WAL mode; all writes go through explicit transactions.
-- `tg-sync`'s Telegram offset (so replies aren't reprocessed) is persisted
-  in a small `kv` table; each reply's job lookup and status/notes update
-  run in one transaction, committed before the confirmation is sent.
+The [deployment workflow](.github/workflows/deploy.yml) builds the frontend, copies source into the persistent volume, rebuilds the Go binary, and restarts the dashboard and worker when `master` changes. It is specific to my server; it is not an installer for a new deployment. [HANDOFF.md](HANDOFF.md) and [CLAUDE.md](CLAUDE.md) contain the operations notes.
+
+You can run the same processes on a Linux machine without Kubernetes. Keep `serve` and `worker` supervised, and schedule `scripts/poll-wrapper.sh` and, once configured, `scripts/tailor-resume-wrapper.sh`. Create `logs/` before redirecting scheduler output there. The Cron page's displayed schedules are descriptive; it does not install or edit a scheduler.
+
+The old `deploy/setup.sh`, systemd service, and `deploy/crontab.example` predate the worker. The crontab still references removed Telegram-sync/watchdog scripts. Do not install that template unchanged.
+
+Back up the shared state, including SQLite and `resume/tailored.json`. SQLite uses WAL mode: use its backup API, or stop writers and checkpoint before copying the database; copying only a live `.db` file can miss uncheckpointed data.
 
 ## Development
 
+| Path | Responsibility |
+|---|---|
+| `cmd/jobwatch/` | CLI commands and worker-handler wiring |
+| `internal/providers/` | Source adapters normalized into a common `Job` type |
+| `internal/poller/` | Collection, filters, source refresh, and discovery notifications |
+| `internal/store/` | SQLite schema, jobs, history, connections, and queue persistence |
+| `internal/eventq/`, `internal/tgsync/` | Event execution and Telegram handling |
+| `internal/web/`, `frontend/src/` | HTTP API, embedded dashboard, and React source |
+| `scripts/` | Resume/email tools, scheduled wrappers, and evaluation experiments |
+| `resume/` | Template, candidate evidence, preferences, and ignored runtime state |
+
+Build the frontend before running Go tests in a fresh checkout; `go:embed` needs `internal/web/dist` to exist. The Python tests require `pytest` in your development environment.
+
 ```sh
-make test        # go test ./...
-make build        # builds ./bin/jobwatch
+make build
+go test ./...
+gofmt -l .
+python3 -m pytest scripts
 ```
 
-Test fixtures for provider parsing live in
-`internal/providers/testdata/{greenhouse,lever,ashby,remoteok,wwr}/` — the
-Greenhouse and Ashby fixtures are trimmed real API responses; the Lever
-fixture is built from Lever's documented public schema (no company with an
-open, non-empty public Lever board was found while building this, dozens
-of candidate slugs were probed and returned either `404` or an empty
-`[]`). RemoteOK and WWR fixtures are hand-built minimal samples matching
-each API's verified real response shape.
+Run Python tests in a separate checkout without personal data. The existing `test_process_job_skips_over_experience_role` still uses the checkout's database instead of a temporary fixture; it fails with `no such table: jobs` on a fresh checkout.
+
+For frontend development, run `npm run dev` in `frontend/` alongside the Go server. A new source adapter implements `Provider.Fetch(ctx, company)` and needs registration, config validation, and fixture-based tests.
+
+## Next steps
+
+The work ahead is to make this usable beyond my own search:
+
+1. Move candidate content and search rules into a shared profile/configuration model, with an architecture other developers can follow.
+2. Make customization work through the dashboard or an agent, with consistent validation for both.
+3. Expose Jobwatch through MCP, with skills and slash-command workflows for AI harnesses.
+4. Improve the dashboard's navigation, forms, feedback, and accessibility using Impeccable's UI guidance.
+
+These are planned changes. This repo does not ship an MCP server, harness plugin, or profile-setup UI yet.
