@@ -1,0 +1,12 @@
+{
+  "compilerOptions": {
+    "target": "es2023",
+    "module": "commonjs",
+    "types": ["node"],
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "rewriteRelativeImportExtensions": true,
+    "outDir": "node_modules/.tmp/profile-tests"
+  },
+  "include": ["profileForm.test.ts", "src/profileForm.ts"]
+}

@@ -39,6 +39,8 @@ func NewServer(st *store.Store) (*Server, error) {
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/profile", s.handleAPIProfileGet)
+	mux.Handle("PUT /api/profile", http.NewCrossOriginProtection().Handler(http.HandlerFunc(s.handleAPIProfileSave)))
 	mux.HandleFunc("GET /api/jobs", s.handleAPIJobs)
 	mux.HandleFunc("POST /api/jobs/manual", s.handleAPIJobsManual)
 	mux.HandleFunc("PATCH /api/jobs/{id}", s.handleAPIPatchJob)
