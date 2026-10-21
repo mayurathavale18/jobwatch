@@ -70,7 +70,8 @@ type Syncer struct {
 
 	// Pages fetches manually-submitted job URLs' titles. Defaults to a real
 	// HTTP fetcher; overridable for tests.
-	Pages jobsubmit.PageFetcher
+	Pages      jobsubmit.PageFetcher
+	ProcessEnv []string
 }
 
 func New(st *store.Store, tg *notify.Telegram, chatID int64, fixScript string, outreachScript string) *Syncer {
@@ -433,6 +434,7 @@ func (s *Syncer) runFix(ctx context.Context, jobID int64, replyToMessageID int64
 		args = append(args, instruction)
 	}
 	cmd := exec.CommandContext(fixCtx, s.FixScript, args...)
+	cmd.Env = s.ProcessEnv
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		slog.Error("tg-sync: fix script failed", "job_id", jobID, "mode", mode, "error", err, "output", string(output))
@@ -464,6 +466,7 @@ func (s *Syncer) runOutreach(ctx context.Context, jobID int64, replyToMessageID 
 		args = append(args, founderEmail)
 	}
 	cmd := exec.CommandContext(outreachCtx, s.OutreachScript, args...)
+	cmd.Env = s.ProcessEnv
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		slog.Error("tg-sync: outreach script failed", "job_id", jobID, "error", err, "output", string(output))

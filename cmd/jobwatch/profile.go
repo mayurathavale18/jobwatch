@@ -9,6 +9,7 @@ import (
 	"os"
 	"time"
 
+	"jobwatch/internal/config"
 	"jobwatch/internal/profile"
 	"jobwatch/internal/store"
 )
@@ -19,15 +20,23 @@ func runProfile(args []string, out io.Writer) error {
 	}
 	command := args[0]
 	fs := flag.NewFlagSet("profile "+command, flag.ContinueOnError)
+	configPath := fs.String("config", "config.yaml", "path to config.yaml")
+	dbPath := fs.String("db", "", "database path override (without loading config)")
 	var file *string
 	var apply *bool
 	if command == "import" {
 		file = fs.String("file", "", "profile snapshot JSON file")
 		apply = fs.Bool("apply", false, "save after validation; revision must match the stored profile")
 	}
-	cfg, err := loadConfigFlag(fs, args[1:])
-	if err != nil {
+	if err := fs.Parse(args[1:]); err != nil {
 		return err
+	}
+	if *dbPath == "" {
+		cfg, err := config.Load(*configPath)
+		if err != nil {
+			return err
+		}
+		*dbPath = cfg.DBPath
 	}
 	if fs.NArg() != 0 {
 		return fmt.Errorf("unexpected positional arguments after profile %s", command)
@@ -51,11 +60,11 @@ func runProfile(args []string, out io.Writer) error {
 		}
 	} else {
 		// A mistyped export path must not create an empty database.
-		if _, err := os.Stat(cfg.DBPath); err != nil {
+		if _, err := os.Stat(*dbPath); err != nil {
 			return err
 		}
 	}
-	st, err := store.Open(cfg.DBPath)
+	st, err := store.Open(*dbPath)
 	if err != nil {
 		return err
 	}

@@ -4,7 +4,7 @@ Watch job boards, filter new roles, tailor resumes, track applications, and draf
 
 I built jobwatch for my own job search. It runs on my server: scheduled jobs collect openings and prepare resumes, a dashboard holds the jobs and their status, and a worker handles Telegram replies and queued actions. I can add a job link, get a tailored PDF, ask for edits, and draft an email without moving the same details between tools.
 
-The polling and tracking work independently of the AI features. Resume generation still contains my own skills, experience, and projects in Python. You can run the tracker with your own sources today; using the resume pipeline requires changing that content too. Making that setup reusable is the next step.
+The polling and tracking work independently of the AI features. Resume and email tools read a candidate profile stored in SQLite. You can import your own background and preferences without editing Python; sources and discovery filters still live in YAML.
 
 ## What it does
 
@@ -141,16 +141,36 @@ Resume and outreach replies need the Python setup below. Send a bare job URL as 
 
 Install Python 3, [Tectonic](https://tectonic-typesetting.github.io/), and Poppler's `pdfinfo`. On Ubuntu, Tectonic also needs `libgraphite2-3`. The main Python scripts use the standard library.
 
-Before enabling tailoring, replace the candidate content:
+Before enabling tailoring, build the Go binary and import your candidate profile:
 
-| File | What it controls |
-|---|---|
-| [resume/master.tex](resume/master.tex) | LaTeX structure and contact details; keep the section anchors used by the generator |
-| [resume/preferences.md](resume/preferences.md) | Search preferences passed into the LLM judgment |
-| [resume/facts.md](resume/facts.md) | Candidate evidence maintained alongside the generator; editing it alone does not update the generated resume |
-| [scripts/tailor_resume.py](scripts/tailor_resume.py) | Active skill tiers, experience bullets, projects, output naming, role/experience filters, and batch limits |
+```sh
+cp examples/profile.example.json profile.local.json
+# Replace the fictional example with your own confirmed background and preferences.
+./bin/jobwatch profile import -file profile.local.json
+./bin/jobwatch profile import -file profile.local.json -apply
+```
 
-The generator currently assumes an engineering search and includes a three-year required-experience ceiling. Review those rules along with the content. The Go CLI supports a custom database path, but the Python tools currently expect `jobwatch.db` in the repository root.
+See [profile setup and migration](docs/profile.md) for the fields and update flow.
+Resumes need a name, email, and candidate skills or confirmed background evidence.
+The generator reads contact details, skill levels, employment, projects, education,
+and search preferences from that profile. It uses only confirmed evidence and
+confirmed projects. Familiar and adjacent skills keep their hedged wording.
+Email generation and follow-up drafts use the same profile and signature.
+
+[resume/template.tex](resume/template.tex) contains the candidate-neutral layout.
+The old `master.tex`, `facts.md`, and `preferences.md` are historical sources;
+editing them no longer changes generated resumes or emails. They are not
+imported automatically.
+
+The generator still assumes an engineering search. Its required-experience
+ceiling comes from the optional `search.maxRequiredExperienceYears` field;
+leaving it unset applies no ceiling. Discovery sources and title/location filters
+still use `config.yaml`. Batch limits remain in `scripts/tailor_resume.py`.
+
+The dashboard and worker pass their selected database and running binary to
+Python. For a direct Python invocation with a custom database, set an absolute
+`JOBWATCH_DB_PATH`; `JOBWATCH_BINARY` can select another built Jobwatch binary.
+The default is the checkout's `jobwatch.db` and `bin/jobwatch`.
 
 Add credentials to your local `.env` for the features you want:
 
@@ -180,7 +200,7 @@ The worker can also process a manual job from the dashboard. Import a LinkedIn d
 - Batch tailoring suppresses its notification when known preference fit is below 45. Manual submissions bypass that threshold, and an unknown fit is not a rejection.
 - A successful compile and one-page check do not verify every resume claim, visual layout, or ATS parsing result. Review the PDF and any instruction-driven edits.
 - The batch skips a job once it has any entry in `resume/tailored.json`, including a failure. Use a manual rebuild to retry it.
-- PDFs currently go under the process user's `~/Documents/mayur-athavale-resume`. In a container, that directory needs persistent storage if the files must survive restarts or be available to a different pod for email attachments.
+- PDFs go under `artifacts/resumes/<profile-hash>/<company>/` beside `jobwatch.db` (other database names use their own `.state/` directory). `JOBWATCH_ARTIFACT_DIR` can override the resume root. Keep that directory on shared persistent storage when workers and the dashboard run in separate pods.
 - Evidence-ledger, classifier, and ranking experiments are advisory or shadow paths. They are not the normal eligibility or resume-generation engine.
 
 ## Add a source
@@ -221,9 +241,9 @@ For an unsupported or blocked site, submit a URL and description manually. Jobwa
 
 Run these from the repository root. Each accepts `-config path/to/config.yaml`.
 
-The shared profile foundation supports [validated JSON import/export](docs/profile.md).
-Imports are validation-only unless `-apply` is passed. Stored profiles are not yet
-used by polling, resume generation, or email; those consumers will migrate next.
+The shared profile supports [validated JSON import/export](docs/profile.md).
+Imports are validation-only unless `-apply` is passed. Resume and email consumers
+use the stored profile; polling still reads YAML.
 
 | Command | Behavior |
 |---|---|
@@ -261,7 +281,7 @@ Back up the shared state, including SQLite and `resume/tailored.json`. SQLite us
 | `internal/eventq/`, `internal/tgsync/` | Event execution and Telegram handling |
 | `internal/web/`, `frontend/src/` | HTTP API, embedded dashboard, and React source |
 | `scripts/` | Resume/email tools, scheduled wrappers, and evaluation experiments |
-| `resume/` | Template, candidate evidence, preferences, and ignored runtime state |
+| `resume/` | Candidate-neutral template, historical candidate files, and ignored runtime state |
 
 Build the frontend before running Go tests in a fresh checkout; `go:embed` needs `internal/web/dist` to exist. The Python tests require `pytest` in your development environment.
 
@@ -272,7 +292,7 @@ gofmt -l .
 python3 -m pytest scripts
 ```
 
-Run Python tests in a separate checkout without personal data. The existing `test_process_job_skips_over_experience_role` still uses the checkout's database instead of a temporary fixture; it fails with `no such table: jobs` on a fresh checkout.
+Python consumer tests use a fictional candidate and temporary state. Network calls are disabled by default; individual tests supply fakes. The CLI integration test builds the Go binary and imports into a temporary SQLite database.
 
 For frontend development, run `npm run dev` in `frontend/` alongside the Go server. A new source adapter implements `Provider.Fetch(ctx, company)` and needs registration, config validation, and fixture-based tests.
 

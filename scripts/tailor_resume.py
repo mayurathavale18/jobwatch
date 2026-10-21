@@ -17,6 +17,9 @@ import sys
 import time
 import html
 import uuid
+
+import profile_runtime as pr
+import profile_resume
 from datetime import datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -29,25 +32,13 @@ from pathlib import Path
 # -----------------------------------------------------------------------------
 # Paths and constants
 # -----------------------------------------------------------------------------
-HOME = Path.home()
-# Resolved relative to this script's own location, not $HOME/jobwatch --
-# that assumed the repo always sits one level under $HOME, true on a laptop
-# checkout but false for the deployed jobwatch service user, whose $HOME
-# *is* the repo root already (see deploy/setup.sh's useradd --home). Same
-# bug class already fixed in the shell cron wrappers (see their own
-# comments); this Python one was missed in that pass since it was grepped
-# for "$HOME/jobwatch" in *.sh only.
 REPO_ROOT = Path(__file__).resolve().parent.parent
-DB_PATH = REPO_ROOT / "jobwatch.db"
-MASTER_TEX_PATH = REPO_ROOT / "resume" / "master.tex"
-FACTS_MD_PATH = REPO_ROOT / "resume" / "facts.md"
-TAILORED_JSON_PATH = REPO_ROOT / "resume" / "tailored.json"
-PREFERENCES_MD_PATH = REPO_ROOT / "resume" / "preferences.md"
-# Intentionally still $HOME-based, unlike the above: this is real output
-# meant to land in whichever environment's own home directory (the user's
-# ~/Documents on a laptop, the service user's home on the server), not a
-# path inside the repo checkout itself.
-OUTPUT_ROOT = HOME / "Documents" / "mayur-athavale-resume"
+DB_PATH = Path(os.environ.get("JOBWATCH_DB_PATH", REPO_ROOT / "jobwatch.db"))
+MASTER_TEX_PATH = REPO_ROOT / "resume" / "template.tex"
+# Preserve default installations; give other database names their own tracker/output.
+STATE_ROOT = DB_PATH.parent if DB_PATH.name == "jobwatch.db" else DB_PATH.with_name(DB_PATH.name + ".state")
+TAILORED_JSON_PATH = STATE_ROOT / "resume" / "tailored.json"
+OUTPUT_ROOT = Path(os.environ.get("JOBWATCH_ARTIFACT_DIR", STATE_ROOT / "artifacts" / "resumes"))
 DATE_STR = datetime.now().strftime("%d-%m-%y")
 TODAY_ISO = datetime.now().strftime("%Y-%m-%d")
 
@@ -379,6 +370,7 @@ def extract_email_from_instruction(text):
     return m.group(0) if m else None
 
 
+@pr.action
 def draft_outreach_email(jd_text, resume_text, founder_name, title, company, extra_instruction=""):
     """Generate a short, personalized cold-outreach email from the
     candidate to a startup founder, referencing concrete JD/resume
@@ -400,9 +392,11 @@ def draft_outreach_email(jd_text, resume_text, founder_name, title, company, ext
     timeout; this function has no fallback by design, so it needs real
     headroom instead.
     """
+    pr.require_identity(resume=False)
     user_content = (
         f"FOUNDER NAME: {founder_name or 'there'}\n\n"
         f"JOB DESCRIPTION:\n{jd_text}\n\nRESUME:\n{resume_text}"
+        + "\n\nCANDIDATE PROFILE:\n" + pr.outreach_context()
     )
     if extra_instruction:
         user_content += f"\n\nADDITIONAL CONTEXT FROM THE CANDIDATE:\n{extra_instruction}"
@@ -410,7 +404,7 @@ def draft_outreach_email(jd_text, resume_text, founder_name, title, company, ext
     raw = call_opencode(
         system_prompt=(
             "You write short, genuine-sounding cold outreach emails from "
-            "a software engineer job candidate directly to a startup "
+            "a job candidate directly to a startup "
             f"founder. The candidate is applying for a {title} role at "
             f"{company}. Reference one or two concrete points from the "
             "job description and the candidate's resume that make them a "
@@ -523,16 +517,11 @@ VALID_WORK_MODES = {"remote", "hybrid", "onsite"}
 
 
 def load_preferences():
-    """Mayur's job-preference profile (resume/preferences.md), fed verbatim
-    into the llm_judge prompt. Missing file degrades to no personalization
-    rather than an error, so a checkout without the file still judges.
-    """
-    try:
-        return PREFERENCES_MD_PATH.read_text(encoding="utf-8").strip()
-    except OSError:
-        return ""
+    return json.dumps(pr.data().get("search", {}).get("preferences", {}), ensure_ascii=False)
 
 
+
+@pr.action
 def llm_judge(jd_text, resume_text, title, company):
     """Judge how a busy recruiter (5-10 seconds per resume, 100+ resumes
     to screen) would react to this resume against this JD: screen it
@@ -629,7 +618,6 @@ def extract_gh_job_id(url):
 # -----------------------------------------------------------------------------
 # Keyword extraction and coverage scoring
 # -----------------------------------------------------------------------------
-# Keyword groups derived from facts.md (production skills + common JD terms)
 KEYWORD_CANDIDATES = {
     # Languages
     "go", "golang", "python", "typescript", "javascript", "java", "scala", "rust", "sql", "bash", "kotlin",
@@ -662,7 +650,7 @@ KEYWORD_CANDIDATES = {
     "forward deployed engineer", "fde", "solutions engineer", "solutions architect",
     "data engineer", "backend engineer", "software engineer", "sre", "site reliability",
     "security", "networking", "billing", "finance",
-    # Recognized-only gaps (not in truthful_skills -- real, not fabricated)
+    # Other recognized JD terms; recognition does not establish a candidate skill.
     "payments", "risk", "fraud", "c++", "ai security", "prompt injection", "jailbreak",
 }
 
@@ -691,67 +679,9 @@ def keyword_in_text(kw, text):
         pattern = re.escape(kw)
     return bool(re.search(pattern, text))
 
-# Skills Mayur truthfully has per facts.md. A JD keyword landing here but
-# absent from the resume text is a real coverage gap worth closing (see
-# inject_keyword_emphasis); one NOT in this set is a fabrication risk and
-# must never be added to the resume, no matter how well it'd score.
-TRUTHFUL_SKILLS = {
-    "go", "golang", "python", "typescript", "javascript", "java", "sql", "bash",
-    "rest", "rest api", "rest apis", "microservices", "fastapi", "nestjs", "node.js", "nodejs",
-    "gin", "krakend", "api gateway", "api gateways", "temporal", "graphql", "hasura",
-    "sse", "streaming", "webhooks", "event-driven", "event driven architecture",
-    "postgresql", "postgres", "mysql", "redis", "valkey", "dynamodb", "opensearch",
-    "mongodb", "s3", "s3 tables", "spark", "sqs", "sns", "dynamodb streams", "eventbridge",
-    "redshift", "athena",
-    "aws", "terraform", "docker", "github actions", "ci/cd",
-    "ecs", "ec2", "rds", "lambda", "secrets manager", "cloudwatch", "fargate",
-    "langgraph", "langchain", "rag", "llm", "ai", "ml", "machine learning", "multi-agent",
-    "agent", "agents", "agentic", "litellm", "mcp", "vector search", "embedding", "embeddings",
-    "knn", "bm25", "hybrid retrieval",
-    "react", "next.js", "nextjs", "vite", "nx", "react native", "expo", "pwa",
-    "full stack", "fullstack", "frontend", "prompt engineering",
-    "distributed systems", "system design", "concurrency", "multi-tenant", "multitenant",
-    "secure coding", "solid", "resiliency", "observability", "metrics", "logging", "tracing",
-    "monitoring", "alerting", "reliability", "scalability", "performance",
-    "idempotency", "retries",
-    "forward deployed engineer", "fde", "solutions engineer", "solutions architect",
-    "data engineer", "backend engineer", "software engineer", "sre", "site reliability",
-    "security", "networking",
-}
-
-# Facts.md's "familiar" tier: concepts known, NOT hands-on production use.
-# A JD keyword landing here is eligible for a resume claim, but only with
-# hedging language ("exposure to", "familiarity with") -- never phrased as
-# if hands-on. See facts.md's "Skills inventory (honesty tiers)" section.
-FAMILIAR_SKILLS = {
-    "kafka", "gcp", "rabbitmq", "firebase",
-}
-
-# Mayur's curated "soft hand" tools -- see facts.md's "Adjacent Skills"
-# section, which this must be kept in sync with (same manual-sync pattern
-# as TRUTHFUL_SKILLS itself). Not in facts.md's production/used/familiar
-# tiers at all, but a fair hedged "exposure to" claim per his own judgment.
-ADJACENT_SKILLS = {
-    "cassandra", "bigquery", "ansible", "jenkins",
-    "pytorch", "tensorflow", "scikit-learn",
-    "kotlin", "spring", "spring boot",
-}
-
 def classify_keyword(kw):
-    """Classify a JD keyword into one of four honesty tiers for resume
-    claims: "direct" (facts.md production/used tier, claim plainly),
-    "hedged_familiar" (facts.md familiar tier, claim only with hedge
-    language), "hedged_adjacent" (Mayur's curated ADJACENT_SKILLS, claim
-    only with hedge language), or "fabrication_risk" (nothing related at
-    all -- never claimed).
-    """
-    if kw in TRUTHFUL_SKILLS:
-        return "direct"
-    if kw in FAMILIAR_SKILLS:
-        return "hedged_familiar"
-    if kw in ADJACENT_SKILLS:
-        return "hedged_adjacent"
-    return "fabrication_risk"
+    return pr.keyword_level(kw)
+
 
 def score_coverage_tiered(keywords, resume_text):
     """Like score_coverage, but buckets keywords by honesty tier instead
@@ -777,11 +707,7 @@ def score_coverage_tiered(keywords, resume_text):
     score = (len(direct) + len(hedged)) / len(keywords) if keywords else 1.0
     return {"score": round(score, 2), "direct": direct, "hedged": hedged, "missing": missing}
 
-# Display casing for keywords that might get injected into bullet text or
-# the Additional Skills line (see inject_keyword_emphasis) -- KEYWORD_CANDIDATES
-# and TRUTHFUL_SKILLS are stored lowercase for matching, but the resume text
-# itself needs real casing (AWS, not Aws). Anything missing here falls back
-# to .title(), which is fine for plain words but wrong for acronyms.
+# Fallback display names for recognized keywords; candidate names take precedence.
 CANONICAL_CASE = {
     "go": "Go", "golang": "Golang", "python": "Python", "typescript": "TypeScript",
     "javascript": "JavaScript", "java": "Java", "sql": "SQL", "bash": "Bash",
@@ -827,7 +753,11 @@ CANONICAL_CASE = {
 }
 
 def canonical_case(kw):
+    for skill in pr.skills():
+        if kw.lower() in [term.lower() for term in [skill["name"], *skill.get("aliases", [])]]:
+            return skill["name"]
     return CANONICAL_CASE.get(kw, kw.title())
+
 
 def score_coverage(keywords, resume_text):
     """Return coverage score and lists of covered/not-covered keywords."""
@@ -837,7 +767,7 @@ def score_coverage(keywords, resume_text):
     for kw in keywords:
         if keyword_in_text(kw, resume_text):
             covered.append(kw)
-        elif kw in TRUTHFUL_SKILLS:
+        elif classify_keyword(kw) == "direct":
             not_covered.append(kw)
         else:
             not_truthful.append(kw)
@@ -888,34 +818,9 @@ def _jd_first_order(skills_str, jd_keywords):
     return ", ".join(matched + unmatched)
 
 
-# Base skill categories. Sub-technologies are flattened into the top-level
-# comma list rather than nested in parens (e.g. "AWS, ECS, EC2, ..." not
-# "AWS (ECS, EC2, ...)") -- ATS skill-taggers that split on top-level commas
-# only were reading the parenthetical form as one long unmatched string
-# instead of recognizing each technology as its own keyword. Must match
-# master.tex's Skills section -- tailored resumes overwrite that section
-# wholesale from here. Every entry must be production/used tier in facts.md.
-BASE_SKILLS = {
-    "Languages": "Go, Python, TypeScript, JavaScript, SQL, Bash",
-    "AI/LLM": "LangGraph, LangChain, RAG, Hybrid Search, KNN, BM25, Multi-Agent Orchestration, LiteLLM, MCP, Azure AI Foundry, SSE Streaming",
-    "Backend": "REST APIs, Microservices, FastAPI, Gin, NestJS, Node.js, KrakenD, GraphQL, Hasura, Temporal, Event-driven Architecture, Webhooks",
-    "Data": "PostgreSQL, Aurora MySQL, Redis, Valkey, DynamoDB, OpenSearch, MongoDB, Spark, S3 Tables, SQS, SNS, DynamoDB Streams, EventBridge",
-    "Infrastructure": "AWS, ECS Fargate, EC2, RDS, Lambda, CloudFront, Secrets Manager, CloudWatch, Terraform, Docker, Kubernetes, GitHub Actions",
-    "Frontend": "React, Next.js, Vite, NX, Module Federation, React Native, PWA",
-    "Concepts": "System Design, Distributed Systems, Concurrency, Multi-Tenant Architecture, Idempotency, Observability, Resiliency Patterns",
-}
-
-
 def _skill_categories(jd_keywords):
-    """BASE_SKILLS plus truthful JD-driven additions (e.g. Java for Stripe
-    roles, which facts.md lists as used-tier)."""
-    categories = dict(BASE_SKILLS)
-    jd_text_lower = ", ".join(jd_keywords).lower()
-    if keyword_in_text("java", jd_text_lower):
-        categories["Languages"] = "Go, Python, TypeScript, JavaScript, Java, SQL, Bash"
-    if any(k in jd_text_lower for k in ("observability", "monitoring", "metrics", "logging")):
-        categories["Infrastructure"] += ", CloudWatch Metrics, Structured Logging"
-    return categories
+    return profile_resume.categories(jd_keywords)
+
 
 
 def build_skills_section(focus, jd_keywords):
@@ -939,100 +844,23 @@ def build_skills_section(focus, jd_keywords):
 
     # Limit to 6 categories if we need to save space (handled by caller via tight flag)
     lines = []
+    order = [cat for cat in order if cat in categories] + [cat for cat in categories if cat not in order]
     for cat in order:
-        lines.append(f"\\techSkill{{{cat}}}{{{_jd_first_order(categories[cat], jd_keywords)}}}")
+        lines.append(f"\\techSkill{{{profile_resume.escape(cat)}}}{{{profile_resume.escape(_jd_first_order(categories[cat], jd_keywords))}}}")
     return "\n".join(lines), order
 
 def build_experience_bullets(focus, jd_keywords, tight=False):
-    """Return ordered list of experience bullets, most relevant first."""
-    # Every claim and number here must trace to resume/facts.md. Impact and
-    # scale lead each bullet (what a recruiter reads in a 5-10s scan), the
-    # stack follows. Order within the list is the default when focus ties.
-    all_bullets = [
-        {
-            "text": "Architected and shipped an \\textbf{agentic AI copilot} (FastAPI, LangGraph multi-agent orchestration) from POC to production, serving \\textbf{5k+ DAU} and \\textbf{100k+ conversations/day}; drove a \\textbf{200\\%+} increase in daily sales leads.",
-            "focus": ["ai_llm", "forward_deployed", "backend"],
-        },
-        {
-            "text": "Built \\textbf{hybrid-retrieval RAG} over OpenSearch (KNN vectors + BM25) with Redis + PostgreSQL storage, and \\textbf{4 streaming strategies} (SSE, AG-UI, LangGraph multi-mode) that drive agent-generated UI components.",
-            "focus": ["ai_llm", "data", "full_stack"],
-        },
-        {
-            "text": "Self-hosted a \\textbf{LiteLLM proxy} governing every model call on the platform: \\textbf{100M tokens/day} across 5 services, with per-source token tracking and plan-based budget enforcement.",
-            "focus": ["ai_llm", "backend", "observability"],
-        },
-        {
-            "text": "Wrote a \\textbf{Go (Gin + KrakenD) API gateway} fronting \\textbf{12 microservices}: auth middleware, rate limiting, and routing at \\textbf{1k RPS} steady / \\textbf{10k RPS} under load with \\textbf{100ms P95} latency.",
-            "focus": ["backend", "security", "networking", "distributed"],
-        },
-        {
-            "text": "Built the conversation \\textbf{ingestion pipeline} (Spark, S3 Tables, OpenSearch): threads and classifies \\textbf{10k+ messages} per 20-minute window into a \\textbf{10M+ document} embedding index at 1--2s latency per window.",
-            "focus": ["data", "ai_llm", "distributed"],
-        },
-        {
-            "text": "Built \\textbf{Temporal}-scheduled extraction agents monitoring \\textbf{20+} client WhatsApp groups (72 runs/day, 1k+ messages per tenant) into Google Sheets via tenant-specific guidance prompts; migrated the service from Python to TypeScript.",
-            "focus": ["ai_llm", "forward_deployed", "backend"],
-        },
-        {
-            "text": "Designed \\textbf{event-driven pipelines} on SQS, SNS, DynamoDB Streams, and webhooks with idempotency, retries, dead-letter handling, and reconciliation for missed or delayed events.",
-            "focus": ["backend", "distributed", "data"],
-        },
-        {
-            "text": "Owned \\textbf{AWS infrastructure for 5 production services} via Terraform (ECS Fargate, RDS, Aurora, DynamoDB, ElastiCache, Lambda, CloudFront); GitHub Actions CI/CD with integration-test gates cut release cycles by \\textbf{35\\%}.",
-            "focus": ["backend", "observability", "security"],
-        },
-        {
-            "text": "Built a \\textbf{multi-tenant GraphQL layer} (Hasura + NestJS) with per-tenant dynamic schema generation, query guards, and role-based access control.",
-            "focus": ["backend", "security", "full_stack"],
-        },
-        {
-            "text": "Migrated \\textbf{Webpack module-federation microfrontends to Vite} with a custom NX build runtime: build times down \\textbf{70\\%}, local dev startup down \\textbf{80\\%}.",
-            "focus": ["frontend", "full_stack"],
-        },
-    ]
+    return profile_resume.experience(focus, jd_keywords, tight)
 
-    # Score each bullet by focus overlap
-    def score(b):
-        score = 0
-        for f in focus:
-            if f in b["focus"]:
-                score += 3
-            # Also give partial credit for distributed/security focus
-            if f == "security" and "security" in b["text"].lower():
-                score += 2
-            if f == "observability" and "observability" in b["text"].lower():
-                score += 2
-            if f == "networking" and "routing" in b["text"].lower():
-                score += 1
-        # Keyword matches
-        for kw in jd_keywords:
-            if keyword_in_text(kw, b["text"]):
-                score += 1
-        return score
-
-    scored = sorted(all_bullets, key=lambda b: score(b), reverse=True)
-
-    # In tight mode, remove weakest bullet(s)
-    if tight:
-        # Keep top 5
-        scored = scored[:5]
-    else:
-        # Keep top 6 or 7 depending on focus
-        if "observability" in focus or len(focus) > 2:
-            scored = scored[:6]
-        else:
-            scored = scored[:7]
-
-    return [b["text"] for b in scored]
 
 MAX_SKILL_LINE_KEYWORDS = 6
 
 def inject_keyword_emphasis(bullets, skills_section, jd_keywords):
     """Close JD-keyword coverage gaps without fabricating anything.
 
-    Direct-tier gaps (facts.md production/used skills missing from the
+    Direct-tier gaps (profile skills marked used, missing from the
     fixed bullet text) get folded in plainly, same as before. Hedged-tier
-    gaps (facts.md familiar tier, or Mayur's curated ADJACENT_SKILLS) get
+    gaps (profile skills marked familiar or adjacent) get
     folded in too, but only with explicit hedging language -- never
     phrased as hands-on. Fabrication-risk keywords
     (score_coverage_tiered's "missing" bucket that isn't hedge-eligible)
@@ -1042,7 +870,7 @@ def inject_keyword_emphasis(bullets, skills_section, jd_keywords):
     # a bolted-on "Also applies X in this work." reads as keyword-stuffing
     # to a human recruiter, while ATS parsers match the skills line just
     # as well. Bullets are returned unchanged.
-    draft_text = skills_section + "\n" + "\n".join(bullets)
+    draft_text = skills_section + "\n" + json.dumps(bullets)
     direct_gaps = [kw for kw in jd_keywords
                    if not keyword_in_text(kw, draft_text) and classify_keyword(kw) == "direct"]
     hedged_gaps = [kw for kw in jd_keywords
@@ -1051,10 +879,10 @@ def inject_keyword_emphasis(bullets, skills_section, jd_keywords):
 
     extra_lines = []
     if direct_gaps:
-        plain = ", ".join(canonical_case(kw) for kw in direct_gaps[:MAX_SKILL_LINE_KEYWORDS])
+        plain = ", ".join(profile_resume.escape(canonical_case(kw)) for kw in direct_gaps[:MAX_SKILL_LINE_KEYWORDS])
         extra_lines.append(f"\\techSkill{{Also}}{{{plain}}}")
     if hedged_gaps:
-        hedged_plain = ", ".join(canonical_case(kw) for kw in hedged_gaps[:MAX_SKILL_LINE_KEYWORDS])
+        hedged_plain = ", ".join(profile_resume.escape(canonical_case(kw)) for kw in hedged_gaps[:MAX_SKILL_LINE_KEYWORDS])
         extra_lines.append(f"\\techSkill{{Familiarity with}}{{{hedged_plain}}}")
     return list(bullets), ("\n".join(extra_lines) if extra_lines else None)
 
@@ -1168,19 +996,12 @@ def llm_reword_bullet(bullet_text, direct_keywords, hedged_keywords):
     return reworded
 
 def build_projects_section(focus, jd_keywords):
-    """Build the Projects & Writing section."""
-    projects = [
-        "\\resumeItem{\\textbf{jobwatch} (Go, Python, React, SQLite, k3s) --- Personal AI job-search agent: polls 50+ company ATS boards and job aggregators, scores each role with an LLM against a preference profile, generates a JD-tailored one-page LaTeX resume under a truth-lock (no unverified claims), and drafts Gmail outreach; self-hosted on k3s with GitHub Actions CD.}",
-        "\\resumeItem{\\textbf{\\extlink{https://github.com/mayurathavale18/pr-manager}{\\underline{PR Manager}}} (Go, GitHub APIs, GitHub Actions) --- CLI tool automating end-to-end PR workflows: reviewer assignment, merge queuing, status checks, and cross-platform binary releases via \\textbf{GitHub Actions CI/CD}.}",
-        "\\resumeItem{\\textbf{\\extlink{https://github.com/mayurathavale18/terminal-portfolio}{\\underline{Terminal Portfolio}}} (Go, BubbleTea, Wish, Lipgloss) --- SSH-accessible TUI at \\texttt{ssh portfolio.mayurathavale.com} with multi-tab navigation, SQLite visitor analytics, and live presence tracking; self-hosted on k3s.}",
-        "\\resumeItem{\\textbf{Technical Writing} --- Published articles on system security, cloud infrastructure, and networking on \\extlink{https://mayatdev1569.medium.com/}{\\underline{Medium}}, including self-hosted VPN tunneling on AWS.}",
-    ]
+    return profile_resume.projects()
 
-    return "\n\\vspace{6pt}\n\n".join(projects)
 
 def build_resume_fields(job, jd_data, tight=False):
     """Build the skills/experience/projects content for a tailored resume,
-    without splicing it into master.tex yet. Split out of generate_resume()
+    without inserting it into the neutral template yet. Split out of generate_resume()
     so rebuild_one() can cache this triple (mode="update" reuses it without
     re-running the rule-based build) and run instruction-driven LLM edits
     on it before splicing.
@@ -1198,7 +1019,7 @@ def build_resume_fields(job, jd_data, tight=False):
         keep = [c for c in skill_order if c != drop][:6]
         categories = _skill_categories(jd_keywords)
         skills_section = "\n".join(
-            f"\\techSkill{{{cat}}}{{{_jd_first_order(categories[cat], jd_keywords)}}}" for cat in keep)
+            f"\\techSkill{{{profile_resume.escape(cat)}}}{{{profile_resume.escape(_jd_first_order(categories[cat], jd_keywords))}}}" for cat in keep)
 
     bullets = build_experience_bullets(focus, jd_keywords, tight=tight)
     projects = build_projects_section(focus, jd_keywords)
@@ -1214,46 +1035,8 @@ def build_resume_fields(job, jd_data, tight=False):
 
 
 def splice_resume_fields(master, skills_section, bullets, projects):
-    """Splice a {skills_section, bullets, projects} triple into master.tex's
-    text, returning the complete document. Pure string surgery -- no
-    generation logic -- so rebuild_one() can call this with either a fresh
-    rule-based triple or an LLM-edited one.
-    """
-    # Replace skills section. Lookahead anchors on \section{Experience} only
-    # (not the preceding \vspace, whose glue value is a master.tex layout
-    # concern and shouldn't be duplicated/hardcoded here).
-    skills_pattern = r"(\\section\{Technical Skills\}\n)(.*?)(?=\n\\vspace.*?\n\\section\{Experience\})"
-    # Use a replacement *function*, not a string: re.sub() interprets
-    # backslash escapes (\t, \n, ...) inside a string repl argument, so a
-    # literal "\techSkill{...}" in skills_section silently became a tab
-    # character followed by plain-text "echSkill{...}" -- a real, reproduced
-    # corruption bug (every Skills line lost its \techSkill command). A
-    # replacement function receives the string as-is, with no reprocessing.
-    master = re.sub(skills_pattern, lambda m: m.group(1) + skills_section + "\n", master, flags=re.S)
+    return profile_resume.render(master, skills_section, bullets, projects)
 
-    # Replace the entire experience item list content. Must search for
-    # \resumeItemListStart starting *after* \section{Experience}: the bare
-    # substring "\resumeItemListStart" also appears earlier, inside the
-    # \newcommand{\resumeItemListStart}{...} macro *definition* -- searching
-    # from the top of the document matched that definition instead of its
-    # usage, and spliced the bullets into the middle of the macro itself,
-    # corrupting it (produced a "Paragraph ended before \new@command was
-    # complete" compile error).
-    bullets_tex = "\n\n".join(f"\\resumeItem{{{b}}}" for b in bullets)
-    exp_section_start = master.find("\\section{Experience}")
-    exp_start = master.find("\\resumeItemListStart", exp_section_start)
-    exp_end = master.find("\\resumeItemListEnd", exp_start) + len("\\resumeItemListEnd")
-    new_exp = "\\resumeItemListStart\n\n" + bullets_tex + "\n\n\\resumeItemListEnd"
-    master = master[:exp_start] + new_exp + master[exp_end:]
-
-    # Replace projects section
-    proj_start = master.find("\\section{Projects \\& Writing}")
-    proj_list_start = master.find("\\resumeItemListStart", proj_start)
-    proj_list_end = master.find("\\resumeItemListEnd", proj_list_start) + len("\\resumeItemListEnd")
-    new_proj = "\\section{Projects \\& Writing}\n\\resumeItemListStart\n\n" + projects + "\n\n\\resumeItemListEnd"
-    master = master[:proj_start] + new_proj + master[proj_list_end:]
-
-    return master
 
 
 def apply_instructions(skills_section, bullets, projects, instructions):
@@ -1275,11 +1058,10 @@ def apply_instructions(skills_section, bullets, projects, instructions):
         "or soften a request based on truthfulness. Preserve LaTeX macro "
         "structure: skills_section must stay a newline-separated list of "
         "\\techSkill{Category}{comma, separated, items} lines; bullets must "
-        "stay plain text (no LaTeX commands, no backslashes) since the caller "
-        "wraps each one in \\resumeItem{...}; projects must stay plain "
+        "preserve the list of role objects and each role id; edit only their bullets lists as plain text; projects must stay plain "
         "\\resumeItem{...}-ready text. "
         "Respond with strict JSON only, no markdown fences, no commentary: "
-        '{"skills_section": "...", "bullets": ["...", ...], "projects": "..."}'
+        '{"skills_section": "...", "bullets": [{"id": "role-id", "bullets": ["..."]}], "projects": "..."}'
     )
     user_content = json.dumps({
         "skills_section": skills_section,
@@ -1300,17 +1082,26 @@ def apply_instructions(skills_section, bullets, projects, instructions):
         new_projects = data["projects"]
         if not isinstance(new_skills, str) or not isinstance(new_projects, str):
             raise ValueError("skills_section/projects must be strings")
-        if not isinstance(new_bullets, list) or not new_bullets or not all(isinstance(b, str) for b in new_bullets):
-            raise ValueError("bullets must be a non-empty list of strings")
-    except (json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
+        if not isinstance(new_bullets, list):
+            raise ValueError("bullets must be a list")
+        if bullets and isinstance(bullets[0], dict):
+            if [item.get("id") for item in new_bullets] != [item["id"] for item in bullets]:
+                raise ValueError("experience role ids must be preserved")
+            if any(not isinstance(item.get("bullets"), list) or not all(isinstance(text, str) for text in item["bullets"]) for item in new_bullets):
+                raise ValueError("role bullets must be lists of strings")
+        elif not new_bullets or not all(isinstance(item, str) for item in new_bullets):
+            raise ValueError("bullets must be strings")
+    except (json.JSONDecodeError, KeyError, TypeError, ValueError, AttributeError) as e:
         log(f"WARN: apply_instructions: malformed LLM response ({e}), keeping unedited resume")
         return (skills_section, bullets, projects), False
 
     return (new_skills, new_bullets, new_projects), True
 
 
+@pr.action
 def generate_resume(job, jd_data, tight=False):
     """Generate tailored LaTeX resume as string."""
+    pr.require_identity(resume=True)
     master = load_master_tex()
     skills_section, bullets, projects, focus, jd_keywords = build_resume_fields(job, jd_data, tight=tight)
     master = splice_resume_fields(master, skills_section, bullets, projects)
@@ -1428,6 +1219,7 @@ def send_telegram_message(text):
         return False, str(e)
 
 
+@pr.action
 def run_outreach_step(job, jid, sector, jd_text, resume_text, pdf_path, founder_email_override=None):
     """Attempt the founder-outreach draft for one already-tailored job.
     Automatic path (founder_email_override=None): gated on outreach_status
@@ -1467,7 +1259,7 @@ def run_outreach_step(job, jid, sector, jd_text, resume_text, pdf_path, founder_
             return "skipped_sector"
 
         apollo = apollo_lookup(job.get("company_name") or "")
-        if not apollo or apollo["employee_count"] is None or apollo["employee_count"] > MAX_OUTREACH_EMPLOYEES:
+        if not apollo or apollo["employee_count"] is None or apollo["employee_count"] > pr.data().get("outreach", {}).get("maxEmployees", MAX_OUTREACH_EMPLOYEES):
             update_outreach_fields(jid, "skipped_size")
             return "skipped_size"
         if not apollo["founder_email"]:
@@ -1537,7 +1329,6 @@ def is_engineering_role(title, jd_text):
     text = (title + " " + jd_text).lower()
     return any(_contains_word(text, term) for term in eng_terms)
 
-MAX_YEARS_CAP = 3
 
 YEARS_EXPERIENCE_RE = re.compile(
     r"(\d{1,2})\s*\+?\s*(?:-\s*\d{1,2}\s*)?\+?\s*years?\s*(?:\S+\s+){0,3}exp(?:erience)?\b",
@@ -1570,14 +1361,15 @@ def max_required_years(jd_text):
             required.extend(int(m) for m in YEARS_EXPERIENCE_RE.findall(clause))
     return max(required) if required else None
 
-def exceeds_experience_cap(jd_text, cap=MAX_YEARS_CAP):
+def exceeds_experience_cap(jd_text, cap=None):
     """True if jd_text states a minimum years-of-experience requirement
     greater than cap. False (fail-open) if no requirement is stated,
     matching how thin/unavailable JDs already fail open elsewhere in
     process_job.
     """
+    cap = pr.data().get("search", {}).get("maxRequiredExperienceYears") if cap is None else cap
     years = max_required_years(jd_text)
-    return years is not None and years > cap
+    return cap is not None and years is not None and years > cap
 
 def load_tailored():
     if TAILORED_JSON_PATH.exists():
@@ -1657,6 +1449,7 @@ def save_tailored(data):
     with open(TAILORED_JSON_PATH, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
+@pr.action
 def rebuild_one(job_id, reply_to_message_id=None, mode="fix", instruction=None):
     """Regenerate one job's tailored resume, recompile, verify, and resend.
     This is the 'fix'/'update' Telegram reply commands' implementation.
@@ -1675,12 +1468,15 @@ def rebuild_one(job_id, reply_to_message_id=None, mode="fix", instruction=None):
     from the same clean base, not chained onto a previous edit's output,
     to avoid compounding LLM drift across repeated fixes.
     """
+    pr.require_identity(resume=True)
     tailored = load_tailored()
     entry = tailored.get(job_id)
     if not entry:
         log(f"ERROR: job {job_id} not found in tracker")
         return False, f"Job {job_id} not found in tracker"
 
+    if not pr.matches(entry):
+        entry = {**entry, "previous_profile_instructions": entry.get("instructions", []), "instructions": []}
     if instruction:
         updated_instructions = list(entry.get("instructions") or [])
         updated_instructions.append(instruction)
@@ -1711,9 +1507,9 @@ def rebuild_one(job_id, reply_to_message_id=None, mode="fix", instruction=None):
 
     comp_slug = company_slug(company, url)
     title_slug = slugify(title)
-    out_dir = OUTPUT_ROOT / comp_slug
+    out_dir = OUTPUT_ROOT / pr.stamp()["profile_sha256"][:12] / comp_slug
     out_dir.mkdir(parents=True, exist_ok=True)
-    base_name = f"mayur_athavale_resume_{comp_slug}_{title_slug}_{DATE_STR}"
+    base_name = f"{pr.filename_prefix()}_resume_{comp_slug}_{title_slug}_{DATE_STR}"
     tex_path = out_dir / f"{base_name}.tex"
     pdf_path = out_dir / f"{base_name}.pdf"
 
@@ -1732,7 +1528,7 @@ def rebuild_one(job_id, reply_to_message_id=None, mode="fix", instruction=None):
         tight = (attempt == 2)
         log(f"  Rebuild attempt {attempt} (tight={tight}) for job {job_id}...")
 
-        use_cache = mode == "update" and bool(entry.get("base_tex_fields"))
+        use_cache = mode == "update" and bool(entry.get("base_tex_fields")) and entry.get("base_profile") == pr.stamp()
         if use_cache:
             cached = entry["base_tex_fields"]
             skills_section, bullets, projects = cached["skills_section"], cached["bullets"], cached["projects"]
@@ -1774,7 +1570,7 @@ def rebuild_one(job_id, reply_to_message_id=None, mode="fix", instruction=None):
         success = True
 
     if success and fresh_base_fields is not None:
-        entry = {**entry, "base_tex_fields": fresh_base_fields}
+        entry = {**entry, "base_tex_fields": fresh_base_fields, "base_profile": pr.stamp()}
         tailored[job_id] = entry
         save_tailored(tailored)
 
@@ -1790,6 +1586,7 @@ def rebuild_one(job_id, reply_to_message_id=None, mode="fix", instruction=None):
 
     tailored[job_id] = {
         **entry,
+        **pr.stamp(),
         "jd_metadata": jd_metadata(job, jd_text, jd_unavailable),
         "jd_unavailable": jd_unavailable,
         "pdf_path": str(pdf_path),
@@ -1895,7 +1692,7 @@ def observe_job_shadow(job, jd_text, jd_unavailable, legacy_judgment=None):
     try:
         from production_shadow import observe
         result = observe(job, jd_text, jd_unavailable, legacy_judgment=legacy_judgment,
-                         db_path=REPO_ROOT / "logs" / "shadow.db", facts_path=FACTS_MD_PATH)
+                         db_path=REPO_ROOT / "logs" / "shadow.db", profile_text=pr.evidence_text())
         log(f"Jev shadow: {result['status']}")
         return result
     except Exception:
@@ -1913,6 +1710,7 @@ def record_job_shadow_legacy(shadow, judgment):
         log("WARN: Jev shadow comparison unavailable; continuing existing tailoring")
 
 
+@pr.action
 def process_job(job, tailored, min_fit=0):
     """Process one job dict from the jobs table: fetch JD (Greenhouse API,
     falling back to fetch_jd_generic for anything else), generate and
@@ -1923,6 +1721,7 @@ def process_job(job, tailored, min_fit=0):
     rebuild_one(), this works for a job with NO pre-existing tracker
     entry, which a fresh manual submission always starts as.
     """
+    pr.require_identity(resume=True)
     jid = str(job["id"])
     company = job.get("company_name") or "Unknown"
     title = job.get("title") or "Unknown"
@@ -1940,10 +1739,11 @@ def process_job(job, tailored, min_fit=0):
         record_job_shadow_legacy(shadow, {"verdict": "skipped_non_eng", "source": "existing_filter"})
         log(f"SKIPPED (non-engineering): {title}")
         tailored[jid] = {
+            **pr.stamp(),
             "company": company, "title": title, "url": url,
             "pdf_path": None, "tex_path": None, "coverage_score": None,
             "status": "ignored",
-            "error": "Non-engineering role; facts.md does not support claims. Skipped per truth lock.",
+            "error": "Non-engineering role; candidate profile does not support claims. Skipped per truth lock.",
             "tailored_date": datetime.now().isoformat(),
         }
         save_tailored(tailored)
@@ -1955,10 +1755,11 @@ def process_job(job, tailored, min_fit=0):
         required = max_required_years(jd_text)
         log(f"SKIPPED (over experience cap): {title} (requires {required}+ years)")
         tailored[jid] = {
+            **pr.stamp(),
             "company": company, "title": title, "url": url,
             "pdf_path": None, "tex_path": None, "coverage_score": None,
             "status": "ignored",
-            "error": f"Requires {required}+ years experience (cap: {MAX_YEARS_CAP}); skipped per truth lock.",
+            "error": f"Requires {required}+ years experience (cap: {pr.data().get('search', {}).get('maxRequiredExperienceYears')}); skipped per truth lock.",
             "tailored_date": datetime.now().isoformat(),
         }
         save_tailored(tailored)
@@ -1967,9 +1768,9 @@ def process_job(job, tailored, min_fit=0):
 
     comp_slug = company_slug(company, url)
     title_slug = slugify(title)
-    out_dir = OUTPUT_ROOT / comp_slug
+    out_dir = OUTPUT_ROOT / pr.stamp()["profile_sha256"][:12] / comp_slug
     out_dir.mkdir(parents=True, exist_ok=True)
-    base_name = f"mayur_athavale_resume_{comp_slug}_{title_slug}_{DATE_STR}"
+    base_name = f"{pr.filename_prefix()}_resume_{comp_slug}_{title_slug}_{DATE_STR}"
     tex_path = out_dir / f"{base_name}.tex"
     pdf_path = out_dir / f"{base_name}.pdf"
 
@@ -2008,6 +1809,7 @@ def process_job(job, tailored, min_fit=0):
         log(f"  FAILED after 2 attempts: {(final_error or '')[:200]}")
         record_job_shadow_legacy(shadow, {"verdict": "tailoring_failed", "source": "existing_pipeline"})
         tailored[jid] = {
+            **pr.stamp(),
             "company": company, "title": title, "url": url,
             "pdf_path": None, "tex_path": str(tex_path) if tex_path.exists() else None,
             "coverage_score": None, "status": "failed", "error": final_error,
@@ -2037,12 +1839,12 @@ def process_job(job, tailored, min_fit=0):
         "fit_score": judgment.get("fit_score"), "work_mode": judgment.get("work_mode"),
         "fit_reason": judgment.get("fit_reason", ""),
         "jd_unavailable": jd_unavailable,
+        **pr.stamp(),
         "jd_metadata": jd_metadata(job, jd_text, jd_unavailable),
     }
     save_tailored(tailored)
     update_job_fit(jid, judgment.get("fit_score"), judgment.get("work_mode"))
 
-    # Only the batch path passes min_fit; a job Mayur submitted by hand
     # always notifies. A null fit (rule-based fallback) is never gated --
     # no LLM signal isn't evidence of a bad fit.
     if judgment.get("fit_score") is not None and judgment["fit_score"] < min_fit:
@@ -2066,7 +1868,8 @@ def process_job(job, tailored, min_fit=0):
     update_job_status(jid, "shortlisted")
 
     try:
-        run_outreach_step(job, jid, judgment.get("sector"), jd_text, resume_text, str(pdf_path))
+        if pr.data().get("outreach", {}).get("autoDraft", True):
+            run_outreach_step(job, jid, judgment.get("sector"), jd_text, resume_text, str(pdf_path))
     except Exception as e:
         log(f"  WARN: outreach step raised unexpectedly: {e}")
 
@@ -2176,6 +1979,24 @@ def _parse_rebuild_cli_args(argv):
             i += 1
     return job_id, reply_to, mode, instruction
 
+@pr.action
+def outreach_one(job_id, founder_email=None):
+    pr.require_identity()
+    with sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute("SELECT * FROM jobs WHERE id=?", (int(job_id),)).fetchone()
+    if row is None:
+        raise ValueError("Job not found")
+    entry = load_tailored().get(str(job_id), {})
+    if entry.get("status") != "done" or not entry.get("pdf_path") or not pr.matches(entry):
+        raise pr.ProfileError("Rebuild this resume for the current profile before drafting outreach.")
+    job = dict(row)
+    jd_text, _ = fetch_jd_text_for_job(job)
+    resume_text = Path(entry["tex_path"]).read_text(encoding="utf-8")
+    return run_outreach_step(job, str(job_id), entry.get("sector"), jd_text, resume_text,
+                             entry["pdf_path"], founder_email_override=founder_email)
+
+
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "--rebuild":
         try:
@@ -2211,37 +2032,11 @@ if __name__ == "__main__":
         print(f"PROCESS_JOB_{_outcome.upper()}")
     elif len(sys.argv) > 1 and sys.argv[1] == "--outreach":
         if len(sys.argv) < 4 or sys.argv[2] != "--job-id":
-            print("Usage: tailor_resume.py --outreach --job-id <job_id> [--founder-email EMAIL]", file=sys.stderr)
-            sys.exit(1)
-        _job_id = sys.argv[3]
-        _founder_email = None
-        if len(sys.argv) > 5 and sys.argv[4] == "--founder-email":
-            _founder_email = sys.argv[5]
-
-        _conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
-        _conn.row_factory = sqlite3.Row
-        _row = _conn.execute("SELECT * FROM jobs WHERE id=?", (int(_job_id),)).fetchone()
-        _conn.close()
-        if not _row:
-            print(f"JOB_ID_NOT_FOUND: {_job_id}", file=sys.stderr)
-            sys.exit(1)
-        _job = dict(_row)
-
-        _tailored = load_tailored()
-        _entry = _tailored.get(_job_id)
-        if not _entry or _entry.get("status") != "done" or not _entry.get("pdf_path"):
-            print(f"OUTREACH_FAILED: job {_job_id} has no successfully tailored resume yet", file=sys.stderr)
-            sys.exit(1)
-
-        _resume_text = ""
-        if _entry.get("tex_path") and Path(_entry["tex_path"]).exists():
-            _resume_text = Path(_entry["tex_path"]).read_text(encoding="utf-8")
-        _jd_text, _ = fetch_jd_text_for_job(_job)
-        _sector = _entry.get("sector")
-
-        _outcome = run_outreach_step(_job, _job_id, _sector, _jd_text, _resume_text, _entry["pdf_path"], founder_email_override=_founder_email)
-        print(f"OUTREACH_{_outcome.upper()}")
-        if _outcome == "failed":
+            sys.exit("Usage: tailor_resume.py --outreach --job-id <job_id> [--founder-email EMAIL]")
+        founder_email = sys.argv[5] if len(sys.argv) > 5 and sys.argv[4] == "--founder-email" else None
+        outcome = outreach_one(sys.argv[3], founder_email)
+        print(f"OUTREACH_{outcome.upper()}")
+        if outcome == "failed":
             sys.exit(1)
     else:
         main()

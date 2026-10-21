@@ -174,10 +174,12 @@ def test_unavailable_jd_no_clauses_and_storage_failure_are_fail_open(setup, monk
 def test_total_deadline_reaps_never_finishing_request_and_legacy_continues(setup, monkeypatch):
     marker = setup["db_path"].with_name("entered.txt")
     monkeypatch.setenv("JOBWATCH_TEST_HANG_MARKER", str(marker))
-    monkeypatch.setattr(shadow, "REQUEST_DEADLINE_SECONDS", 1)
+    # Windows spawn can spend over a second importing before reaching the requester.
+    deadline = 3 if os.name == "nt" else 1
+    monkeypatch.setattr(shadow, "REQUEST_DEADLINE_SECONDS", deadline)
     started = time.monotonic()
     result = observe(setup, requester=hanging_requester)
-    assert result["status"] == "error" and time.monotonic() - started < 3
+    assert result["status"] == "error" and time.monotonic() - started < deadline + 2
     assert marker.read_text(encoding="utf-8") == "entered"
     assert shadow.record_legacy(result["request_hash"], {"verdict": "continued"}, setup["db_path"])["status"] == "recorded"
     assert rows(setup)[0]["reserved_tokens"] > 0

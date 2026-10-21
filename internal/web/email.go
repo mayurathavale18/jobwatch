@@ -227,6 +227,7 @@ func (s *Server) handleAPIJobEmail(w http.ResponseWriter, r *http.Request) {
 	})
 
 	cmd := exec.Command("python3", emailToolScript)
+	cmd.Env = s.processEnv
 	cmd.Stdin = bytes.NewReader(payload)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

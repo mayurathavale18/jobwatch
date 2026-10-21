@@ -1,0 +1,178 @@
+{
+  "revision": 0,
+  "profile": {
+    "schemaVersion": 1,
+    "identity": {
+      "name": "Alex Example",
+      "email": "alex@example.com",
+      "location": "Pune, India",
+      "links": [
+        {
+          "label": "Portfolio",
+          "url": "https://example.com"
+        }
+      ]
+    },
+    "background": {
+      "skills": [
+        {
+          "id": "skill-go",
+          "name": "Go",
+          "aliases": [
+            "golang"
+          ],
+          "category": "Languages",
+          "level": "used",
+          "evidenceIds": [
+            "api-work"
+          ]
+        },
+        {
+          "id": "skill-python",
+          "name": "Python",
+          "level": "used",
+          "category": "Languages"
+        },
+        {
+          "id": "skill-terraform",
+          "name": "Terraform",
+          "level": "used",
+          "category": "Infrastructure"
+        },
+        {
+          "id": "skill-kafka",
+          "name": "Kafka",
+          "level": "familiar",
+          "category": "Messaging"
+        },
+        {
+          "id": "skill-rabbitmq",
+          "name": "RabbitMQ",
+          "level": "familiar",
+          "category": "Messaging"
+        },
+        {
+          "id": "skill-gcp",
+          "name": "GCP",
+          "level": "familiar",
+          "category": "Infrastructure"
+        },
+        {
+          "id": "skill-firebase",
+          "name": "Firebase",
+          "level": "familiar",
+          "category": "Data"
+        },
+        {
+          "id": "skill-cassandra",
+          "name": "Cassandra",
+          "level": "adjacent",
+          "category": "Data"
+        },
+        {
+          "id": "skill-bigquery",
+          "name": "BigQuery",
+          "level": "adjacent",
+          "category": "Data"
+        }
+      ],
+      "experience": [
+        {
+          "id": "role-example",
+          "company": "Example Company",
+          "title": "Software Engineer",
+          "startDate": "2024-01",
+          "evidenceIds": [
+            "api-work"
+          ]
+        }
+      ],
+      "education": [
+        {
+          "id": "education-example",
+          "institution": "Example University",
+          "qualification": "B.Tech",
+          "startDate": "2019-08",
+          "endDate": "2023-05"
+        }
+      ],
+      "projects": [
+        {
+          "id": "project-example",
+          "name": "Example Project",
+          "url": "https://example.com/project",
+          "status": "planned"
+        }
+      ],
+      "evidence": [
+        {
+          "id": "api-work",
+          "text": "Built a Go API for an internal reporting tool.",
+          "source": "Candidate-provided example; replace before use",
+          "status": "confirmed",
+          "tags": [
+            "backend"
+          ]
+        }
+      ]
+    },
+    "search": {
+      "sources": [
+        {
+          "name": "Example Company",
+          "provider": "lever",
+          "slug": "example"
+        }
+      ],
+      "filters": {
+        "includeKeywords": [
+          "software engineer"
+        ],
+        "locationsInclude": [
+          "india",
+          "remote"
+        ]
+      },
+      "preferences": {
+        "workModes": [
+          "remote",
+          "hybrid"
+        ],
+        "workAuthorization": [
+          {
+            "country": "IN",
+            "authorized": true
+          }
+        ],
+        "willingToRelocate": false,
+        "compensation": [
+          {
+            "market": "India",
+            "currency": "INR",
+            "period": "annual",
+            "basis": "fixed",
+            "minimum": 1200000
+          }
+        ],
+        "notes": "Fictional example, not the repository author's preferences."
+      },
+      "maxRequiredExperienceYears": 3
+    },
+    "resume": {
+      "template": "default",
+      "maxPages": 1
+    },
+    "outreach": {
+      "signature": "Alex Example",
+      "autoDraft": false,
+      "maxEmployees": 20
+    },
+    "automation": {
+      "maxPerCycle": 8,
+      "dailyBudget": 20,
+      "minFitToNotify": 45,
+      "manualBypassFit": true,
+      "unknownFitPolicy": "notify"
+    }
+  }
+}

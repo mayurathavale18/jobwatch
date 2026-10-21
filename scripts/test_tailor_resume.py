@@ -19,9 +19,7 @@ def test_classify_keyword_hedged_familiar_for_kafka():
 
 
 def test_classify_keyword_hedged_adjacent_for_cassandra():
-    # Cassandra is one of Mayur's curated "Adjacent Skills" in facts.md
-    # (Databases : cassandra) -- not in facts.md's production/used/familiar
-    # tiers at all, but a fair hedged claim per his own judgment call.
+    # Cassandra is explicitly adjacent in the fictional candidate fixture.
     assert tr.classify_keyword("cassandra") == "hedged_adjacent"
 
 
@@ -747,7 +745,7 @@ def test_process_job_uses_manual_jd_text_skips_fetch_jd_generic(monkeypatch, tmp
 
     def fake_build_resume_fields(job, jd_data, tight=False):
         captured_jd_data.update(jd_data)
-        return "skills", ["bullet"], "projects", "focus", ["kw"]
+        return "skills", [{"id": "role-example", "bullets": ["bullet"]}], "projects", "focus", ["kw"]
     monkeypatch.setattr(tr, "build_resume_fields", fake_build_resume_fields)
 
     manual_jd_text = (
@@ -821,7 +819,7 @@ def test_process_job_trusts_short_manual_jd_text_verbatim(monkeypatch, tmp_path)
 
     def fake_build_resume_fields(job, jd_data, tight=False):
         captured_jd_data.update(jd_data)
-        return "skills", ["bullet"], "projects", "focus", ["kw"]
+        return "skills", [{"id": "role-example", "bullets": ["bullet"]}], "projects", "focus", ["kw"]
     monkeypatch.setattr(tr, "build_resume_fields", fake_build_resume_fields)
 
     short_manual_jd_text = "Backend Engineer, Go + Kubernetes, remote OK."  # well under 150 chars
@@ -860,7 +858,7 @@ def test_rebuild_one_uses_manual_jd_text_from_db(monkeypatch, tmp_path):
 
     def fake_build_resume_fields(job, jd_data, tight=False):
         captured_jd_data.update(jd_data)
-        return "skills", ["bullet"], "projects", "focus", ["kw"]
+        return "skills", [{"id": "role-example", "bullets": ["bullet"]}], "projects", "focus", ["kw"]
 
     monkeypatch.setattr(tr, "build_resume_fields", fake_build_resume_fields)
     monkeypatch.setattr(tr, "splice_resume_fields", lambda master, s, b, p: "MASTER")
@@ -906,7 +904,7 @@ def test_rebuild_one_whitespace_only_manual_jd_text_falls_through_to_title(monke
 
     def fake_build_resume_fields(job, jd_data, tight=False):
         captured_jd_data.update(jd_data)
-        return "skills", ["bullet"], "projects", "focus", ["kw"]
+        return "skills", [{"id": "role-example", "bullets": ["bullet"]}], "projects", "focus", ["kw"]
 
     monkeypatch.setattr(tr, "build_resume_fields", fake_build_resume_fields)
     monkeypatch.setattr(tr, "splice_resume_fields", lambda master, s, b, p: "MASTER")
@@ -1020,7 +1018,7 @@ def test_rebuild_one_update_mode_reuses_cached_base_fields(monkeypatch, tmp_path
     tr.save_tailored({
         "1": {
             "company": "Stripe", "title": "Backend Engineer", "url": "https://stripe.com/jobs/1",
-            "status": "done", "base_tex_fields": cached_fields, "instructions": [],
+            "status": "done", **tr.pr.stamp(), "base_profile": tr.pr.stamp(), "base_tex_fields": cached_fields, "instructions": [],
         }
     })
 
@@ -1149,7 +1147,7 @@ def test_rebuild_one_update_mode_does_not_reapply_instructions_on_retry(monkeypa
     tr.save_tailored({
         "1": {
             "company": "Stripe", "title": "Backend Engineer", "url": "https://stripe.com/jobs/1",
-            "status": "done", "base_tex_fields": cached_fields, "instructions": ["drop the Kafka bullet"],
+            "status": "done", **tr.pr.stamp(), "base_profile": tr.pr.stamp(), "base_tex_fields": cached_fields, "instructions": ["drop the Kafka bullet"],
         }
     })
 
@@ -1588,7 +1586,7 @@ def _patch_process_job_pipeline(monkeypatch, tmp_path, fit_score):
     monkeypatch.setattr(tr, "OUTPUT_ROOT", tmp_path / "output")
     monkeypatch.setattr(tr, "compile_tex", lambda tex_path: (True, ""))
     monkeypatch.setattr(tr, "get_page_count", lambda pdf_path: 1)
-    monkeypatch.setattr(tr, "build_resume_fields", lambda job, jd_data, tight=False: ("skills", ["bullet"], "projects", "focus", ["kw"]))
+    monkeypatch.setattr(tr, "build_resume_fields", lambda job, jd_data, tight=False: ("skills", [{"id": "role-example", "bullets": ["bullet"]}], "projects", "focus", ["kw"]))
     monkeypatch.setattr(tr, "update_job_fit", lambda *a: None)
     monkeypatch.setattr(tr, "run_outreach_step", lambda *a, **k: None)
     monkeypatch.setattr(tr, "llm_judge", lambda *a: {

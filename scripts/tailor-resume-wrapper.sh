@@ -14,9 +14,7 @@ ROOT_DIR="$(dirname "$SCRIPT_DIR")"
 LOG_DIR="$ROOT_DIR/logs"
 LOCK_FILE="$ROOT_DIR/.tailor-resume.lock"
 
-# tailor_resume.py resolves its own paths via Path.home(), so this isn't
-# strictly required today, but matching poll-wrapper.sh's/tg-sync-wrapper.sh's
-# cd-to-root convention avoids relying on that staying true.
+# Keep relative wrapper paths consistent with the poller and worker.
 cd "$ROOT_DIR"
 FAIL_COUNTER="$ROOT_DIR/.tailor-resume-failures"
 

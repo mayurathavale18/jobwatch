@@ -111,17 +111,17 @@ def record_legacy(request_hash, judgment, db_path=None):
         return {"status": "shadow_error"}
 
 
-def observe(job, jd_text, jd_unavailable=False, legacy_judgment=None, db_path=None, facts_path=None, requester=None):
+def observe(job, jd_text, jd_unavailable=False, legacy_judgment=None, db_path=None, facts_path=None, requester=None, profile_text=None):
     if os.environ.get("JOBWATCH_JEV_SHADOW_ENABLED") != "1":
         return {"status": "disabled"}
     try:
-        return _observe(job, jd_text, jd_unavailable, legacy_judgment, db_path, facts_path, requester)
+        return _observe(job, jd_text, jd_unavailable, legacy_judgment, db_path, facts_path, requester, profile_text)
     except Exception:
         # Source/provider/database failures cannot alter the existing job workflow.
         return {"status": "shadow_error"}
 
 
-def _observe(job, jd_text, jd_unavailable, legacy_judgment, db_path, facts_path, requester):
+def _observe(job, jd_text, jd_unavailable, legacy_judgment, db_path, facts_path, requester, profile_text):
     from evidence_ledger import build_ledger
     from rank_shadow import FIT_QUESTION
     from jev_shadow import MODEL, parse_response
@@ -130,7 +130,7 @@ def _observe(job, jd_text, jd_unavailable, legacy_judgment, db_path, facts_path,
     if not isinstance(jd_text, str) or len(jd_text) > 2_000_000:
         raise ValueError("Invalid bounded JD")
     facts_path = Path(facts_path) if facts_path else ROOT / "resume" / "facts.md"
-    profile = facts_path.read_text(encoding="utf-8")
+    profile = profile_text if profile_text is not None else facts_path.read_text(encoding="utf-8")
     jd_hash, profile_hash = digest(jd_text), digest(profile)
     clauses = [] if jd_unavailable else selected_clauses(jd_text)
     state = {"posting_evidence": clauses, "candidate_evidence": [], "skipped_contexts": [],
@@ -138,7 +138,7 @@ def _observe(job, jd_text, jd_unavailable, legacy_judgment, db_path, facts_path,
     if clauses:
         case_state = {"jd": jd_text, "title": job.get("title", "")}
         case = {"id": job_id, "state": case_state, "state_sha256": digest(json.dumps(case_state, sort_keys=True))}
-        ledger = build_ledger([case], profile, [{"id": job_id, "clauses": [{"evidence": text} for text in clauses]}], str(facts_path))
+        ledger = build_ledger([case], profile, [{"id": job_id, "clauses": [{"evidence": text} for text in clauses]}], ("shared-profile" if profile_text is not None else str(facts_path)))
         seen = set()
         for clause in ledger["records"][0]["clauses"]:
             for capability in clause["capabilities"]:

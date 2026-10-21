@@ -1,4 +1,5 @@
 """Local Jobwatch diagnostics. No polling, account access or message sending."""
+import profile_runtime as pr
 import argparse
 import json
 import sqlite3
@@ -54,7 +55,10 @@ def record_event(conn, job_id, kind, detail, at, to=""):
                  (job_id, kind, detail, utc_time(at).isoformat()))
 
 
-def due_followups(conn, now):
+@pr.action
+def due_followups(conn, now, signature=None):
+    pr.require_identity()
+    signature = signature if signature is not None else (pr.data().get("outreach", {}).get("signature") or pr.data()["identity"]["name"])
     conn.row_factory = sqlite3.Row
     drafts = []
     for job in conn.execute("SELECT id,title,company_name,url,email_to FROM jobs WHERE status IN ('new','shortlisted','applied')"):
@@ -81,7 +85,7 @@ def due_followups(conn, now):
             recipient = ""
         drafts.append({"job_id": job["id"], "anchor_id": anchor["id"], "to": recipient,
                        "subject": f"Following up: {job['title']} at {job['company_name']}",
-                       "body": f"Hi,\n\nFollowing up on my earlier message about the {job['title']} role at {job['company_name']}. I remain interested and would appreciate an update on next steps.\n\nRole: {job['url']}\n\nThank you,\nMayur Athavale"})
+                       "body": f"Hi,\n\nFollowing up on my earlier message about the {job['title']} role at {job['company_name']}. I remain interested and would appreciate an update on next steps.\n\nRole: {job['url']}\n\nThank you,\n{signature}"})
     return drafts
 
 
@@ -106,6 +110,8 @@ def main():
     parser.add_argument("--at", default=datetime.now(timezone.utc).isoformat())
     parser.add_argument("--write-dir", type=Path)
     args = parser.parse_args()
+    import os
+    os.environ["JOBWATCH_DB_PATH"] = str(args.db.resolve())
     now = utc_time(args.at)
     writable = args.command == "record" or (args.command == "followups" and args.write_dir is not None)
     mode = "rw" if writable else "ro"
