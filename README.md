@@ -241,7 +241,8 @@ For an unsupported or blocked site, submit a URL and description manually. Jobwa
 
 Run these from the repository root. Each accepts `-config path/to/config.yaml`.
 
-The shared profile supports [validated JSON import/export](docs/profile.md).
+The dashboard's **Profile** page edits candidate facts, preferences and outreach
+defaults using the same validation as [JSON import/export](docs/profile.md).
 Imports are validation-only unless `-apply` is passed. Resume and email consumers
 use the stored profile; polling still reads YAML.
 
@@ -305,4 +306,5 @@ The work ahead is to make this usable beyond my own search:
 3. Expose Jobwatch through MCP, with skills and slash-command workflows for AI harnesses.
 4. Improve the dashboard's navigation, forms, feedback, and accessibility using Impeccable's UI guidance.
 
-These are planned changes. This repo does not ship an MCP server, harness plugin, or profile-setup UI yet.
+The shared candidate profile and dashboard editor are available. Moving polling
+settings into the profile and shipping an MCP server or harness plugin remain planned work.
