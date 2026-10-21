@@ -10,31 +10,31 @@ import (
 )
 
 type Company struct {
-	Name     string `yaml:"name"`
-	Provider string `yaml:"provider"`
+	Name     string `yaml:"name" json:"name"`
+	Provider string `yaml:"provider" json:"provider"`
 	// Slug identifies the company's own board for per-company providers
 	// (greenhouse/lever/ashby/workday). For search-aggregator providers
 	// (remoteok/wwr), which return jobs across many real companies in one
 	// Fetch call, it's just a label -- each returned Job carries its own
 	// real CompanySlug/CompanyName instead.
-	Slug string `yaml:"slug"`
+	Slug string `yaml:"slug" json:"slug"`
 	// Host and Site are Workday-only: Workday postings live at
 	// https://{slug}.{host}.myworkdayjobs.com/wday/cxs/{slug}/{site}/jobs,
 	// where slug is the tenant, host is the numbered subdomain (e.g. "wd1",
 	// "wd3"), and site is the career-site path segment (e.g.
 	// "WellsFargoJobs"). Both are required when provider is "workday".
-	Host string `yaml:"host,omitempty"`
-	Site string `yaml:"site,omitempty"`
+	Host string `yaml:"host,omitempty" json:"host,omitempty"`
+	Site string `yaml:"site,omitempty" json:"site,omitempty"`
 }
 
 type Filters struct {
-	IncludeKeywords  []string `yaml:"include_keywords"`
-	ExcludeKeywords  []string `yaml:"exclude_keywords"`
-	LocationsInclude []string `yaml:"locations_include"`
+	IncludeKeywords  []string `yaml:"include_keywords" json:"includeKeywords,omitempty"`
+	ExcludeKeywords  []string `yaml:"exclude_keywords" json:"excludeKeywords,omitempty"`
+	LocationsInclude []string `yaml:"locations_include" json:"locationsInclude,omitempty"`
 	// LocationsExclude rejects a location segment that names a region the
 	// candidate can't legally work from ("Remote, United States"), even
 	// though it also matches an include term like "remote".
-	LocationsExclude []string `yaml:"locations_exclude"`
+	LocationsExclude []string `yaml:"locations_exclude" json:"locationsExclude,omitempty"`
 }
 
 type Telegram struct {
@@ -74,14 +74,34 @@ func Load(path string) (*Config, error) {
 }
 
 func (c *Config) validate() error {
-	if len(c.Companies) == 0 {
+	if err := ValidateCompanies(c.Companies); err != nil {
+		return err
+	}
+	if c.DBPath == "" {
+		c.DBPath = "./jobwatch.db"
+	}
+	if c.Dashboard.Addr == "" {
+		c.Dashboard.Addr = "127.0.0.1:8787"
+	}
+	if c.Telegram.BotTokenEnv == "" {
+		c.Telegram.BotTokenEnv = "JOBWATCH_TG_TOKEN"
+	}
+	if c.Telegram.ChatIDEnv == "" {
+		c.Telegram.ChatIDEnv = "JOBWATCH_TG_CHAT"
+	}
+	return nil
+}
+
+// ValidateCompanies shares provider requirements between YAML config and profiles.
+func ValidateCompanies(companies []Company) error {
+	if len(companies) == 0 {
 		return fmt.Errorf("companies: at least one company required")
 	}
 	validProviders := map[string]bool{
 		"greenhouse": true, "lever": true, "ashby": true, "workday": true,
 		"remoteok": true, "wwr": true, "web3career": true, "remotive": true,
 	}
-	for i, co := range c.Companies {
+	for i, co := range companies {
 		if co.Name == "" {
 			return fmt.Errorf("companies[%d]: name required", i)
 		}
@@ -95,18 +115,6 @@ func (c *Config) validate() error {
 		if provider == "workday" && (co.Host == "" || co.Site == "") {
 			return fmt.Errorf("companies[%d] (%s): workday requires host and site", i, co.Name)
 		}
-	}
-	if c.DBPath == "" {
-		c.DBPath = "./jobwatch.db"
-	}
-	if c.Dashboard.Addr == "" {
-		c.Dashboard.Addr = "127.0.0.1:8787"
-	}
-	if c.Telegram.BotTokenEnv == "" {
-		c.Telegram.BotTokenEnv = "JOBWATCH_TG_TOKEN"
-	}
-	if c.Telegram.ChatIDEnv == "" {
-		c.Telegram.ChatIDEnv = "JOBWATCH_TG_CHAT"
 	}
 	return nil
 }

@@ -221,8 +221,14 @@ For an unsupported or blocked site, submit a URL and description manually. Jobwa
 
 Run these from the repository root. Each accepts `-config path/to/config.yaml`.
 
+The shared profile foundation supports [validated JSON import/export](docs/profile.md).
+Imports are validation-only unless `-apply` is passed. Stored profiles are not yet
+used by polling, resume generation, or email; those consumers will migrate next.
+
 | Command | Behavior |
 |---|---|
+| `jobwatch profile import -file profile.local.json` | Validate a versioned profile without opening the database; add `-apply` to save |
+| `jobwatch profile export` | Export the stored profile, revision, and timestamp as JSON |
 | `jobwatch backfill` | Fetch and record existing jobs without discovery notifications |
 | `jobwatch poll` | Run one collection cycle, store jobs, and notify on new filter matches |
 | `jobwatch serve` | Serve the dashboard and JSON API |
