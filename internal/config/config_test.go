@@ -36,6 +36,7 @@ companies:
     slug: wf
     host: wd1
     site: WellsFargoJobs
+    search_text: India
 filters: {}
 `)
 	cfg, err := Load(path)
@@ -48,6 +49,9 @@ filters: {}
 	co := cfg.Companies[0]
 	if co.Host != "wd1" || co.Site != "WellsFargoJobs" {
 		t.Errorf("Host/Site = %q/%q, want wd1/WellsFargoJobs", co.Host, co.Site)
+	}
+	if co.SearchText != "India" {
+		t.Errorf("SearchText = %q, want India", co.SearchText)
 	}
 }
 

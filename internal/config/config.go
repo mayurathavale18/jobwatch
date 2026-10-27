@@ -25,6 +25,8 @@ type Company struct {
 	// "WellsFargoJobs"). Both are required when provider is "workday".
 	Host string `yaml:"host,omitempty" json:"host,omitempty"`
 	Site string `yaml:"site,omitempty" json:"site,omitempty"`
+	// SearchText narrows Workday's bounded scan before local filters run.
+	SearchText string `yaml:"search_text,omitempty" json:"searchText,omitempty"`
 }
 
 type Filters struct {

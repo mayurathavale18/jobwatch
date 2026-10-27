@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"jobwatch/internal/config"
@@ -76,6 +77,7 @@ func (w *Workday) Fetch(ctx context.Context, company config.Company) ([]Job, err
 			AppliedFacets: map[string]any{},
 			Limit:         w.PageSize,
 			Offset:        page * w.PageSize,
+			SearchText:    company.SearchText,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("workday %s: encode request: %w", company.Slug, err)
@@ -133,13 +135,15 @@ func parseWorkday(postings []wdPosting, baseURL string, company config.Company) 
 			return nil, fmt.Errorf("workday %s: marshal raw: %w", company.Slug, err)
 		}
 
-		// bulletFields[0] is the requisition ID (e.g. "R-561638") on every
-		// Workday tenant observed so far -- stable and unique, so prefer it
-		// as the dedupe key; externalPath is the fallback for postings
-		// without one.
+		// Intel puts a shared "Spotlight Job" label before the requisition.
+		// Only use a bullet corroborated by the job URL; otherwise keep the
+		// unique path rather than collapsing unrelated jobs under a label.
 		externalID := p.ExternalPath
-		if len(p.BulletFields) > 0 && p.BulletFields[0] != "" {
-			externalID = p.BulletFields[0]
+		for _, field := range p.BulletFields {
+			if field != "" && strings.HasSuffix(p.ExternalPath, "_"+field) {
+				externalID = field
+				break
+			}
 		}
 
 		jobs = append(jobs, Job{
