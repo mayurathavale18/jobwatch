@@ -80,6 +80,8 @@ db_path: "./jobwatch.db"
 
 The checked-in address is `0.0.0.0:8787` for the deployed container. The application has no built-in authentication; keep a local instance on loopback, or put authentication in front of it when hosting it.
 
+Workday sources can set `search_text` (for example, `India`) to narrow the API search before local filters run. Each scan still stops after 300 postings; search text is not a country-eligibility guarantee, and listings with ambiguous locations need a direct role check. Other providers ignore this field.
+
 ### 3. Seed the database and open the dashboard
 
 ```sh

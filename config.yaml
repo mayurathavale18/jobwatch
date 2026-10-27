@@ -157,6 +157,50 @@ companies:
   - name: "Palantir"
     provider: lever
     slug: palantir
+  # Batool Ali's Oct 20 hiring list: official feeds verified Oct 27, 2026.
+  # Career-board discovery is not proof of a current, eligible opening.
+  - name: "Workato"
+    provider: greenhouse
+    slug: workato
+  - name: "Truveta"
+    provider: greenhouse
+    slug: truveta
+  - name: "Intel"
+    provider: workday
+    slug: intel
+    host: wd1
+    site: External
+    search_text: India
+  - name: "Marvell"
+    provider: workday
+    slug: marvell
+    host: wd1
+    site: MarvellCareers
+    search_text: India
+  - name: "Samsung"
+    provider: workday
+    slug: sec
+    host: wd3
+    site: Samsung_Careers
+    search_text: India
+  - name: "Visa"
+    provider: workday
+    slug: visa
+    host: wd5
+    site: Visa
+    search_text: India
+  - name: "Adobe"
+    provider: workday
+    slug: adobe
+    host: wd5
+    site: external_experienced
+    search_text: India
+  - name: "Amgen"
+    provider: workday
+    slug: amgen
+    host: wd1
+    site: Careers
+    search_text: India
 
 filters:
   include_keywords: ["backend", "software engineer", "sde", "swe", "platform", "golang", "python", "cloud", "infrastructure", "fullstack", "full stack", "full-stack", "data engineer", "distributed systems", "forward deployed", "fde", "ai engineer", "ai platform", "llm", "machine learning engineer", "ml engineer", "mlops", "rag", "agent", "sre", "site reliability", "systems engineer", "devops", "solutions engineer", "microservices", "reliability engineer"]
