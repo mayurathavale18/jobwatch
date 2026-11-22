@@ -182,6 +182,12 @@ export interface ManualJobResponse {
   title: string
 }
 
+export async function logInstahyreApplication(form: FormData): Promise<ManualJobResponse> {
+  const res = await fetch('/api/jobs/instahyre', { method: 'POST', body: form })
+  if (!res.ok) throw new Error((await res.text()).trim())
+  return res.json()
+}
+
 export async function submitManualJob(
   url: string,
   jdText?: string,

@@ -331,6 +331,15 @@ func runWorker(args []string) error {
 				}
 				return runScript(ctx, *tailorOneScript, strconv.FormatInt(p.JobID, 10))
 			},
+			store.EventInstahyreDraft: func(ctx context.Context, payload string) error {
+				var p struct {
+					JobID int64 `json:"job_id"`
+				}
+				if err := json.Unmarshal([]byte(payload), &p); err != nil {
+					return err
+				}
+				return runScript(ctx, "scripts/instahyre-draft.sh", strconv.FormatInt(p.JobID, 10))
+			},
 			store.EventOutreach: func(ctx context.Context, payload string) error {
 				var p struct {
 					JobID        int64  `json:"job_id"`

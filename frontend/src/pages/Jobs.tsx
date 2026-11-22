@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import InstahyreApplication from './InstahyreApplication'
 import { fetchJobs, patchJob, submitManualJob, triggerOutreach, type JobsResponse } from '../api'
 
 function filtersFromLocation(): { status: string; provider: string; company: string; q: string; days: number } {
@@ -21,6 +22,7 @@ export default function Jobs() {
   const [filters, setFilters] = useState(filtersFromLocation)
   const [page, setPage] = useState(pageFromLocation)
   const [data, setData] = useState<JobsResponse | null>(null)
+  const [refresh, setRefresh] = useState(0)
   const [manualUrl, setManualUrl] = useState('')
   const [manualJdText, setManualJdText] = useState('')
   const [manualOutreachInstruction, setManualOutreachInstruction] = useState('')
@@ -91,7 +93,7 @@ export default function Jobs() {
     window.history.replaceState(null, '', qs ? `/?${qs}` : '/')
 
     fetchJobs({ ...filters, page }).then(setData).catch(console.error)
-  }, [filters, page])
+  }, [filters, page, refresh])
 
   function updateFilters(patch: Partial<{ status: string; provider: string; company: string; q: string; days: number }>) {
     setFilters((f) => ({ ...f, ...patch }))
@@ -131,6 +133,7 @@ export default function Jobs() {
 
   return (
     <>
+      <InstahyreApplication onLogged={() => setRefresh((value) => value + 1)} />
       <form className="add-job-form" onSubmit={handleSubmitManualJob} noValidate>
         <div className="add-job">
           <input

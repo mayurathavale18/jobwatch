@@ -104,6 +104,17 @@ CREATE TABLE IF NOT EXISTS jobs (
 	UNIQUE(provider, company_slug, external_id)
 );
 
+CREATE TABLE IF NOT EXISTS instahyre_applications (
+	job_id INTEGER PRIMARY KEY REFERENCES jobs(id) ON DELETE CASCADE,
+	url TEXT NOT NULL UNIQUE,
+	recipient_name TEXT NOT NULL,
+	recipient_email TEXT NOT NULL,
+	work_link TEXT NOT NULL,
+	resume_name TEXT NOT NULL,
+	resume_pdf BLOB NOT NULL,
+	draft_submitting INTEGER NOT NULL DEFAULT 0
+);
+
 CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
 CREATE INDEX IF NOT EXISTS idx_jobs_company ON jobs(company_slug);
 CREATE INDEX IF NOT EXISTS idx_jobs_first_seen ON jobs(first_seen_at);

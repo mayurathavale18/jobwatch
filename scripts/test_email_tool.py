@@ -46,3 +46,61 @@ def test_main_keeps_log_noise_off_stdout(monkeypatch, capsys):
     captured = capsys.readouterr()
     assert json.loads(captured.out) == {"ok": True}
     assert "chatter" in captured.err
+
+
+def test_prepare_instahyre_draft_uses_exact_pdf_and_drafts_only(tmp_path, monkeypatch):
+    import base64
+    from email import policy
+    from email.parser import BytesParser
+    import sqlite3
+
+    db = tmp_path / "jobwatch.db"
+    pdf = b"%PDF-1.7\nsubmitted version\x00"
+    with sqlite3.connect(db) as conn:
+        conn.executescript("""
+        CREATE TABLE jobs (id INTEGER PRIMARY KEY, status TEXT, title TEXT, company_name TEXT,
+            manual_jd_text TEXT, email_draft_id TEXT, email_to TEXT, email_sent_at TEXT);
+        CREATE TABLE instahyre_applications (job_id INTEGER, recipient_name TEXT, recipient_email TEXT,
+            work_link TEXT, resume_name TEXT, resume_pdf BLOB, draft_submitting INTEGER DEFAULT 0);
+        INSERT INTO jobs VALUES (42, 'applied', 'Backend Engineer', 'Example Labs',
+            'Build APIs in Go', '', '', '');
+        """)
+        conn.execute("INSERT INTO instahyre_applications VALUES (42, 'Morgan', '', ?, 'submitted.pdf', ?, 0)",
+                     ("https://example.org/gateway", pdf))
+
+    monkeypatch.setattr(et.tr, "DB_PATH", db)
+    monkeypatch.setattr(et.tr, "_gmail_access_token", lambda: "fake-token")
+
+    def generate(**kwargs):
+        evidence = json.loads(kwargs["user_content"])
+        assert evidence["recipient_name"] == "Morgan"
+        assert evidence["job_description"] == "Build APIs in Go"
+        return '{"subject":"Backend Engineer at Example Labs","body":"I applied on Instahyre."}'
+
+    monkeypatch.setattr(et.tr, "call_opencode", generate)
+    requests = []
+
+    def gmail(request, timeout):
+        assert request.full_url == et.tr.GMAIL_DRAFTS_URL
+        assert request.get_method() == "POST"
+        requests.append(request)
+        return io.BytesIO(b'{"id":"draft-42","message":{"id":"message-42"}}')
+
+    monkeypatch.setattr(et, "urlopen", gmail)
+    with et.tr.pr.bind({"revision": 1, "profile": {"identity": {
+        "name": "Candidate", "links": [{"label": "Website", "url": "https://example.org"}],
+    }}}):
+        result = et.prepare_instahyre_draft({"job_id": 42})
+        assert result["attached_resume"] and result["draft_id"] == "draft-42"
+        assert et.prepare_instahyre_draft({"job_id": 42})["ok"]
+
+    assert len(requests) == 1
+    raw = json.loads(requests[0].data)["message"]["raw"]
+    mime = BytesParser(policy=policy.default).parsebytes(base64.urlsafe_b64decode(raw))
+    assert mime["To"] is None
+    body = mime.get_body().get_content()
+    assert "https://example.org/gateway" in body
+    assert "https://example.org\n" in body
+    attachment, = mime.iter_attachments()
+    assert attachment.get_filename() == "submitted.pdf"
+    assert attachment.get_payload(decode=True) == pdf

@@ -94,6 +94,22 @@ export default function Email({ jobId }: { jobId: number }) {
 
   if (!job) return <p className="muted">{msg ?? 'Loading...'}</p>
 
+  if (job.companySlug === 'instahyre') {
+    return (
+      <div className="email-page">
+        <p><a href="/">← Jobs</a></p>
+        <h2>{job.companyName} — {job.title}</h2>
+        <p>{job.emailDraftId
+          ? `Gmail draft saved${job.emailTo ? ` for ${job.emailTo}` : ' with a blank To field'}.`
+          : 'Check the worker queue for draft progress.'}</p>
+        <p>
+          <a href="https://mail.google.com/mail/u/0/#drafts" target="_blank" rel="noopener noreferrer">Review in Gmail</a>
+          {' · '}<a href="/cron">Worker queue</a>
+        </p>
+      </div>
+    )
+  }
+
   const disabled = busy !== null
 
   return (

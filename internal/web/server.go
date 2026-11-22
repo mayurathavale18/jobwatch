@@ -41,6 +41,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/jobs", s.handleAPIJobs)
 	mux.HandleFunc("POST /api/jobs/manual", s.handleAPIJobsManual)
+	mux.HandleFunc("POST /api/jobs/instahyre", s.handleAPIInstahyreApplication)
 	mux.HandleFunc("PATCH /api/jobs/{id}", s.handleAPIPatchJob)
 	mux.HandleFunc("POST /api/jobs/{id}/outreach", s.handleAPIJobsOutreach)
 	mux.HandleFunc("GET /api/jobs/{id}", s.handleAPIJobGet)
