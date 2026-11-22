@@ -49,6 +49,7 @@ def load_dotenv(path):
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import tailor_resume as tr  # noqa: E402
+from recruiter_lookup import find_work_email  # noqa: E402
 
 
 def get_job(job_id):
@@ -297,6 +298,12 @@ def prepare_instahyre_draft(req):
     )
     signature = "\n".join(dict.fromkeys(v for v in (identity["name"], website, work_link) if v))
 
+    recipient = application["recipient_email"] or find_work_email(
+        application["recipient_name"], job["company_name"], job["title"],
+        client_id=tr.GMAIL_CLIENT_ID, client_secret=tr.GMAIL_CLIENT_SECRET,
+        token_url=tr.GMAIL_TOKEN_URL,
+    )
+
     # Gmail draft creation has no idempotency key. Avoid a second POST if the
     # worker restarts after Gmail accepts it but before the draft ID is saved.
     with sqlite3.connect(tr.DB_PATH) as conn:
@@ -311,7 +318,7 @@ def prepare_instahyre_draft(req):
             return {"ok": True}
 
     return save_draft({
-        "job_id": job_id, "to": application["recipient_email"],
+        "job_id": job_id, "to": recipient,
         "subject": draft["subject"], "body": draft["body"] + "\n\n" + signature,
     }, token=token)
 

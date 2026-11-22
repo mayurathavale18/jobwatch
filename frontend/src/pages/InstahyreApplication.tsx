@@ -44,7 +44,7 @@ export default function InstahyreApplication({ onLogged }: { onLogged: () => voi
           <label>Verified work email <input name="recipientEmail" type="email" /></label>
           <label>Relevant work sample URL <input name="workLink" type="url" maxLength={2048} /></label>
         </div>
-        <p className="hint">If the posting has no verified email, the draft’s To field stays blank.</p>
+        <p className="hint">With recruiter lookup configured, enter the name shown on the posting. If no reliable work email is found, the draft’s To field stays blank.</p>
         <div className="add-job">
           <label>PDF used to apply <input name="resume" type="file" accept="application/pdf,.pdf" required /></label>
           <button type="submit" disabled={busy}>{busy ? 'Logging…' : 'Log and prepare draft'}</button>

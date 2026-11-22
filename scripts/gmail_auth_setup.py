@@ -16,6 +16,7 @@ you approve access, and it prints a refresh_token to paste into .env as
 GMAIL_REFRESH_TOKEN -- the unattended cron pipeline uses that token
 forever after (until revoked), no repeated browser flow needed.
 """
+import argparse
 import http.server
 import json
 import os
@@ -47,6 +48,12 @@ class _CallbackHandler(http.server.BaseHTTPRequestHandler):
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Authorize a Jobwatch Gmail token.")
+    parser.add_argument("--lookup", action="store_true", help="Authorize read-only recruiter lookup")
+    lookup = parser.parse_args().lookup
+    scope = "https://www.googleapis.com/auth/gmail.readonly" if lookup else SCOPE
+    token_var = "JOBWATCH_GMAIL_LOOKUP_REFRESH_TOKEN" if lookup else "GMAIL_REFRESH_TOKEN"
+
     if not CLIENT_ID or not CLIENT_SECRET:
         print("ERROR: set GMAIL_CLIENT_ID and GMAIL_CLIENT_SECRET env vars first.", file=sys.stderr)
         sys.exit(1)
@@ -55,7 +62,7 @@ def main():
         "client_id": CLIENT_ID,
         "redirect_uri": REDIRECT_URI,
         "response_type": "code",
-        "scope": SCOPE,
+        "scope": scope,
         "access_type": "offline",
         "prompt": "consent",
     })
@@ -89,11 +96,11 @@ def main():
 
     refresh_token = data.get("refresh_token")
     if not refresh_token:
-        print(f"ERROR: no refresh_token in response: {data}", file=sys.stderr)
+        print("ERROR: Google did not return a refresh token.", file=sys.stderr)
         sys.exit(1)
 
     print("\nSuccess. Add this to .env (both laptop and EC2):\n")
-    print(f"export GMAIL_REFRESH_TOKEN={refresh_token}")
+    print(f"export {token_var}={refresh_token}")
 
 
 if __name__ == "__main__":

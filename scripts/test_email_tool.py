@@ -2,6 +2,8 @@ import io
 import json
 import os
 
+import pytest
+
 import email_tool as et
 
 
@@ -48,7 +50,8 @@ def test_main_keeps_log_noise_off_stdout(monkeypatch, capsys):
     assert "chatter" in captured.err
 
 
-def test_prepare_instahyre_draft_uses_exact_pdf_and_drafts_only(tmp_path, monkeypatch):
+@pytest.mark.parametrize("detected_email", ["", "morgan@example.org"])
+def test_prepare_instahyre_draft_uses_exact_pdf_and_drafts_only(tmp_path, monkeypatch, detected_email):
     import base64
     from email import policy
     from email.parser import BytesParser
@@ -70,6 +73,7 @@ def test_prepare_instahyre_draft_uses_exact_pdf_and_drafts_only(tmp_path, monkey
 
     monkeypatch.setattr(et.tr, "DB_PATH", db)
     monkeypatch.setattr(et.tr, "_gmail_access_token", lambda: "fake-token")
+    monkeypatch.setattr(et, "find_work_email", lambda *args, **kwargs: detected_email)
 
     def generate(**kwargs):
         evidence = json.loads(kwargs["user_content"])
@@ -97,7 +101,7 @@ def test_prepare_instahyre_draft_uses_exact_pdf_and_drafts_only(tmp_path, monkey
     assert len(requests) == 1
     raw = json.loads(requests[0].data)["message"]["raw"]
     mime = BytesParser(policy=policy.default).parsebytes(base64.urlsafe_b64decode(raw))
-    assert mime["To"] is None
+    assert str(mime["To"] or "") == detected_email
     body = mime.get_body().get_content()
     assert "https://example.org/gateway" in body
     assert "https://example.org\n" in body

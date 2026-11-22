@@ -159,6 +159,23 @@ and search preferences from that profile. It uses only confirmed evidence and
 confirmed projects. Familiar and adjacent skills keep their hedged wording.
 Email generation and follow-up drafts use the same profile and signature.
 
+For Instahyre draft recipient lookup, provide the name shown on the posting
+and configure either or both of the following on the worker:
+
+- `JOBWATCH_BRAVE_SEARCH_API_KEY` enables lookup of public hiring posts.
+  Jobwatch sends Brave the recruiter's name, company and role as a search query.
+- `JOBWATCH_GMAIL_LOOKUP_REFRESH_TOKEN` enables lookup in recent Gmail
+  correspondence. Authorize it separately with the `gmail.readonly` scope
+  using the configured Gmail OAuth client (`python3 scripts/gmail_auth_setup.py --lookup`).
+  Jobwatch reads matching message
+  headers and does not use this token to create drafts.
+
+An explicitly supplied address takes precedence. Lookup requires a named
+work mailbox and matching role and employer evidence. Conflicting, missing
+or unavailable results leave To blank. The Instahyre worker only creates
+drafts, and the recipient remains editable in Gmail before sending.
+
+
 [resume/template.tex](resume/template.tex) contains the candidate-neutral layout.
 The old `master.tex`, `facts.md`, and `preferences.md` are historical sources;
 editing them no longer changes generated resumes or emails. They are not
