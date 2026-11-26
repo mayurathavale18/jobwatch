@@ -4,7 +4,28 @@ Jobwatch can validate, store, and export one candidate profile per database.
 Resume generation, preference judgments, email generation/revision, founder
 outreach, and local follow-up drafts read this profile. Importing a profile
 does not itself generate a resume or contact anyone. Discovery sources and
-filters still come from YAML; dashboard editing and MCP tools are future work.
+filters still come from YAML. The dashboard's Profile page edits the same stored
+profile; MCP tools are future work.
+
+## Dashboard editor
+
+Open **Profile** in the dashboard to edit identity, links, experience, education,
+skills, projects, evidence, preferences and outreach defaults. Changes stay in
+the form until **Save profile** passes the same Go validation as CLI import.
+An empty database starts an incomplete profile; add only what you know.
+
+New evidence and projects start as **needs review**. Link supporting evidence
+with checkboxes; unlink a fact from skills, roles and projects before removing
+it. Optional choices retain unknown separately from no, and blank amounts stay
+unknown. Compensation uses whole currency units, not lakhs or thousands.
+
+Each save checks the revision. If another browser or the CLI saved first, your
+edits remain in the form. Download them before discarding edits and loading the
+latest profile. Leaving with unsaved changes triggers a browser warning.
+
+The editor preserves source/filter, automation and resume-template settings
+without exposing controls for them. Polling still uses YAML. Saving a profile
+does not regenerate existing resumes, create drafts, enqueue work or send mail.
 
 ## Try it
 
@@ -101,8 +122,10 @@ not imply it is ready for resume generation or any other consumer.
 - `internal/store.GetProfile` and `SaveProfile` own the singleton SQLite row
   and atomic revision checks. Direct saves also validate the profile.
 - `cmd/jobwatch/profile.go` handles flags, files, and JSON output.
+- `internal/web/profile.go` serves `GET /api/profile` and revision-checked
+  `PUT /api/profile` for the dashboard using the same decoder and store methods.
 
-Future HTTP and MCP handlers can call the same model and store methods.
+Future MCP handlers can call the same model and store methods.
 There is no separate profile server, new database, or interface framework.
 Machine settings and credentials stay in the existing configuration/environment;
 the profile has no credential fields. No existing Markdown, LaTeX, or Python
@@ -145,8 +168,8 @@ requests can still edit the selected resume sections.
 Profile sources/filters and `automation` settings are stored and validated but
 are not active configuration yet. The existing 8-per-cycle, 20-per-day,
 45-point batch fit threshold, manual fit bypass, unknown-fit behavior, and
-one-page/two-attempt PDF flow remain in place. This change adds no scheduler,
-profile editor, or MCP endpoint.
+one-page/two-attempt PDF flow remain in place. The dashboard editor does not
+change these limits or add a scheduler or MCP endpoint.
 
 ## Existing installations
 
